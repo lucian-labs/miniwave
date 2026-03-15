@@ -1,0 +1,4 @@
+miniwave
+*.o
+build/
+.DS_Store

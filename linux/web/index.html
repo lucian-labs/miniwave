@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>WaveUI — miniwave</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0d0d0d;
+  --panel: #1a1a2e;
+  --card: #16213e;
+  --card-hover: #1a2744;
+  --accent: #e94560;
+  --good: #00d4aa;
+  --solo: #ffd700;
+  --mute: #e94560;
+  --text: #e0e0e0;
+  --dim: #666;
+  --border: #2a2a4a;
+  --lcd-bg: #0a1a0a;
+  --lcd-fg: #00ff88;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 13px;
+  height: 100%;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Top Bar ─────────────────────────────────────────────────────── */
+
+#topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  height: 48px;
+  flex-shrink: 0;
+}
+
+#topbar .logo {
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: var(--accent);
+}
+
+#topbar .logo span { color: var(--dim); font-weight: normal; font-size: 11px; }
+
+.midi-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-section label { color: var(--dim); font-size: 11px; text-transform: uppercase; }
+
+#midi-select {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  min-width: 150px;
+}
+
+.master-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.master-section label { color: var(--dim); font-size: 11px; text-transform: uppercase; }
+
+#master-vol {
+  width: 100px;
+  accent-color: var(--accent);
+}
+
+#master-val { font-size: 12px; min-width: 32px; text-align: right; }
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  margin-left: 12px;
+  transition: background 0.3s;
+}
+
+.status-dot.connected { background: var(--good); box-shadow: 0 0 6px var(--good); }
+
+/* ── Main Layout ─────────────────────────────────────────────────── */
+
+#main {
+  display: flex;
+  height: calc(100% - 48px);
+  position: relative;
+}
+
+/* ── Rack Grid ───────────────────────────────────────────────────── */
+
+#rack {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  align-content: start;
+}
+
+.ch-strip {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ch-strip:hover { border-color: var(--accent); background: var(--card-hover); }
+.ch-strip.active-detail { border-color: var(--accent); box-shadow: 0 0 8px rgba(233,69,96,0.3); }
+
+.ch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ch-num { font-size: 12px; font-weight: bold; color: var(--dim); }
+
+.ch-buttons { display: flex; gap: 4px; }
+
+.ch-btn {
+  width: 24px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.ch-btn:hover { border-color: var(--text); color: var(--text); }
+.ch-btn.active-indicator { color: var(--good); font-size: 8px; border: none; width: 16px; }
+.ch-btn.active-indicator.sounding { color: var(--good); text-shadow: 0 0 6px var(--good); animation: pulse 0.5s ease infinite; }
+.ch-btn.mute-on { background: var(--mute); color: #fff; border-color: var(--mute); }
+.ch-btn.solo-on { background: var(--solo); color: #000; border-color: var(--solo); }
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.ch-type-select {
+  width: 100%;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.ch-preset {
+  font-size: 11px;
+  color: var(--dim);
+  display: flex;
+  justify-content: space-between;
+  min-height: 16px;
+}
+
+.ch-preset .name { color: var(--text); }
+.ch-preset .num { color: var(--accent); font-size: 10px; }
+
+.ch-vol-bar {
+  height: 6px;
+  background: #111;
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  position: relative;
+  cursor: ew-resize;
+}
+
+.ch-vol-fill {
+  height: 100%;
+  background: var(--good);
+  border-radius: 3px;
+  transition: width 0.1s;
+}
+
+.ch-vol-val {
+  font-size: 10px;
+  color: var(--dim);
+  text-align: right;
+  margin-top: 2px;
+}
+
+.ch-activity {
+  font-size: 10px;
+  color: var(--dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ch-activity .meter {
+  display: flex;
+  gap: 1px;
+}
+
+.ch-activity .meter-dot {
+  width: 4px;
+  height: 8px;
+  background: #222;
+  border-radius: 1px;
+}
+
+.ch-activity .meter-dot.on { background: var(--good); }
+
+/* ── Detail Pane ─────────────────────────────────────────────────── */
+
+#detail {
+  width: 420px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  display: none;
+  flex-direction: column;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+#detail.open { display: flex; }
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.detail-header h2 { font-size: 14px; font-weight: bold; }
+.detail-header h2 span { color: var(--accent); }
+
+.detail-close {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  font-family: inherit;
+}
+
+.detail-close:hover { color: var(--text); }
+
+.detail-body { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+/* Preset Browser */
+.preset-section { display: flex; flex-direction: column; gap: 8px; }
+.preset-section h3 { font-size: 11px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+
+.preset-lcd {
+  background: var(--lcd-bg);
+  border: 2px solid #1a3a1a;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 16px;
+  color: var(--lcd-fg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: inherit;
+  text-shadow: 0 0 8px var(--lcd-fg);
+}
+
+.preset-lcd .num { color: var(--lcd-fg); opacity: 0.7; font-size: 14px; }
+
+.family-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.family-btn {
+  padding: 4px 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.family-btn:hover { color: var(--text); border-color: var(--text); }
+.family-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.preset-btn {
+  padding: 6px 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-btn:hover { border-color: var(--accent); }
+.preset-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* Parameters */
+.params-section { display: flex; flex-direction: column; gap: 8px; }
+
+.params-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.params-header h3 { font-size: 11px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+
+.override-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--border);
+}
+
+.override-badge.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.reset-btn {
+  padding: 3px 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.reset-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.params-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.param-control {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.param-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+}
+
+.param-label .name { color: var(--dim); text-transform: uppercase; }
+.param-label .val { color: var(--text); }
+
+.param-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  height: 16px;
+}
+
+/* Virtual Keyboard */
+.keyboard-section { display: flex; flex-direction: column; gap: 6px; }
+.keyboard-section h3 { font-size: 11px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+
+.keyboard {
+  display: flex;
+  position: relative;
+  height: 80px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.key {
+  border: 1px solid #333;
+  border-radius: 0 0 3px 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  font-size: 8px;
+  transition: background 0.05s;
+}
+
+.key.white {
+  background: #ddd;
+  color: #666;
+  flex: 1;
+  height: 100%;
+  z-index: 1;
+}
+
+.key.black {
+  background: #222;
+  color: #888;
+  width: 24px;
+  height: 55%;
+  position: absolute;
+  z-index: 2;
+}
+
+.key.white:active, .key.white.pressed { background: var(--accent); color: #fff; }
+.key.black:active, .key.black.pressed { background: var(--accent); color: #fff; }
+
+.note-display { font-size: 11px; color: var(--dim); text-align: center; height: 16px; }
+
+/* Detail Volume */
+.detail-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.detail-volume label { font-size: 11px; color: var(--dim); text-transform: uppercase; min-width: 50px; }
+.detail-volume input { flex: 1; accent-color: var(--good); }
+.detail-volume .val { font-size: 12px; min-width: 32px; text-align: right; }
+
+/* ── WaveUI Badge ────────────────────────────────────────────────── */
+
+#badge {
+  position: fixed;
+  bottom: 8px;
+  right: 12px;
+  font-size: 10px;
+  color: var(--dim);
+  z-index: 100;
+  pointer-events: auto;
+  cursor: default;
+}
+
+#badge a { color: var(--dim); text-decoration: none; }
+#badge a:hover { color: var(--text); }
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+
+@media (max-width: 1024px) {
+  #rack { grid-template-columns: repeat(2, 1fr); }
+  #detail { width: 360px; }
+}
+
+@media (max-width: 768px) {
+  #rack { grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; }
+  #detail {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    z-index: 50;
+    background: var(--panel);
+  }
+  .midi-section { display: none; }
+  #master-vol { width: 60px; }
+}
+
+@media (max-width: 480px) {
+  #rack { grid-template-columns: 1fr; }
+  .ch-strip { min-height: 100px; }
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="logo">miniwave <span>WaveUI</span></div>
+  <div class="midi-section">
+    <label>MIDI</label>
+    <select id="midi-select"><option value="">No Device</option></select>
+  </div>
+  <div class="master-section">
+    <label>Master</label>
+    <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.75">
+    <span id="master-val">0.75</span>
+    <div class="status-dot" id="status-dot"></div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="rack"></div>
+  <div id="detail"></div>
+</div>
+
+<div id="badge"><a href="/osc-spec" target="_blank">WaveUI</a> &middot; OSC spec at /osc-spec</div>
+
+<script>
+'use strict';
+
+// ── Preset Data (mirrored from presets.h) ────────────────────────
+
+const PRESET_NAMES = [
+  'Grand Piano','Bright Piano','Honky-Tonk','E.Piano 1','E.Piano 2',
+  'Clav','Harpsichord','DX Piano','Stage Piano','Vintage Keys',
+  'Jazz Organ','Rock Organ','Church Organ','Reed Organ','Pipe Organ',
+  'Drawbar 1','Drawbar 2','Perc Organ','Rotary Organ','Full Organ',
+  'Trumpet','Trombone','French Horn','Brass Sect','Synth Brass 1',
+  'Synth Brass 2','Mute Trumpet','Brass Pad','Power Brass','Fanfare',
+  'Strings','Slow Strings','Syn Strings 1','Syn Strings 2','Warm Pad',
+  'Choir Pad','Atmosphere','Brightness Pad','Sweep Pad','Ice Pad',
+  'Finger Bass','Pick Bass','Slap Bass','Fretless','Synth Bass 1',
+  'Synth Bass 2','Acid Bass','Rubber Bass','Sub Bass','Wobble Bass',
+  'Square Lead','Saw Lead','Sync Lead','Calliope','Chiffer',
+  'Charang','Solo Vox','Fifth Lead','Bass+Lead','Poly Lead',
+  'Tubular Bell','Glockenspiel','Music Box','Vibraphone','Marimba',
+  'Xylophone','Steel Drums','Crystal','Kalimba','Tinkle Bell',
+  'Harmonica','Accordion','Clarinet','Oboe','Bassoon',
+  'Flute','Recorder','Pan Flute','Bottle','Shakuhachi',
+  'Rain','Soundtrack','Sci-Fi','Atmosphere 2','Goblin',
+  'Echo Drop','Star Theme','Sitar','Telephone','Helicopter',
+  'Chiptune 1','Chiptune 2','Chiptune 3','Retro Beep','Bit Crush',
+  'Arcade','Game Over','Power Up','Digital Vox'
+];
+
+const FAMILIES = [
+  { name: 'Piano',   start: 0,  count: 10 },
+  { name: 'Organ',   start: 10, count: 10 },
+  { name: 'Brass',   start: 20, count: 10 },
+  { name: 'Strings', start: 30, count: 10 },
+  { name: 'Bass',    start: 40, count: 10 },
+  { name: 'Lead',    start: 50, count: 10 },
+  { name: 'Bell',    start: 60, count: 10 },
+  { name: 'Reed',    start: 70, count: 10 },
+  { name: 'SFX',     start: 80, count: 10 },
+  { name: 'Retro',   start: 90, count: 9 }
+];
+
+const PARAM_DEFS = [
+  { key: 'carrier_ratio', label: 'Carrier', min: 0.1, max: 4, step: 0.01 },
+  { key: 'mod_ratio',     label: 'Mod Ratio', min: 0.1, max: 15, step: 0.1 },
+  { key: 'mod_index',     label: 'Mod Index', min: 0, max: 15, step: 0.1 },
+  { key: 'attack',        label: 'Attack', min: 0.001, max: 1, step: 0.001 },
+  { key: 'decay',         label: 'Decay', min: 0.01, max: 3, step: 0.01 },
+  { key: 'sustain',       label: 'Sustain', min: 0, max: 1, step: 0.01 },
+  { key: 'release',       label: 'Release', min: 0.01, max: 4, step: 0.01 },
+  { key: 'feedback',      label: 'Feedback', min: 0, max: 1, step: 0.01 }
+];
+
+// ── State ────────────────────────────────────────────────────────
+
+let rackState = {
+  slots: Array.from({length: 16}, () => ({
+    active: 0, type: '', volume: 1, mute: 0, solo: 0
+  })),
+  master_volume: 0.75,
+  midi_device: ''
+};
+
+let instrumentTypes = [];
+let midiDevices = [];
+let activeDetail = -1;
+let channelStates = {};
+let selectedFamily = 0;
+let pressedKeys = new Set();
+
+// ── WebSocket ────────────────────────────────────────────────────
+
+let ws = null;
+let reconnectTimer = null;
+
+function connect() {
+  if (ws && ws.readyState <= 1) return;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}`);
+
+  ws.onopen = () => {
+    document.getElementById('status-dot').classList.add('connected');
+    send({ type: 'rack_types' });
+    send({ type: 'midi_devices' });
+    send({ type: 'rack_status' });
+    if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('status-dot').classList.remove('connected');
+    if (!reconnectTimer) reconnectTimer = setInterval(connect, 2000);
+  };
+
+  ws.onerror = () => {};
+
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      handleMessage(data);
+    } catch (err) {}
+  };
+}
+
+function send(msg) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+}
+
+function handleMessage(data) {
+  switch (data.type) {
+    case 'rack_status':
+      rackState.slots = data.slots;
+      rackState.master_volume = data.master_volume;
+      rackState.midi_device = data.midi_device;
+      updateRack();
+      updateTopBar();
+      break;
+    case 'rack_types':
+      instrumentTypes = data.types;
+      updateTypeDropdowns();
+      break;
+    case 'midi_devices':
+      midiDevices = data.devices;
+      updateMidiDropdown();
+      break;
+    case 'ch_status':
+      if (activeDetail >= 0) {
+        channelStates[activeDetail] = data;
+        updateDetail();
+      }
+      break;
+  }
+}
+
+// ── Render Rack ──────────────────────────────────────────────────
+
+function renderRack() {
+  const rack = document.getElementById('rack');
+  rack.innerHTML = '';
+  for (let ch = 0; ch < 16; ch++) {
+    const strip = document.createElement('div');
+    strip.className = 'ch-strip';
+    strip.id = `ch-${ch}`;
+    strip.dataset.ch = ch;
+
+    strip.innerHTML = `
+      <div class="ch-header">
+        <span class="ch-num">CH ${ch + 1}</span>
+        <div class="ch-buttons">
+          <button class="ch-btn active-indicator" id="act-${ch}" title="Activity">&#9654;</button>
+          <button class="ch-btn" id="mute-${ch}" title="Mute">M</button>
+          <button class="ch-btn" id="solo-${ch}" title="Solo">S</button>
+        </div>
+      </div>
+      <select class="ch-type-select" id="type-${ch}">
+        <option value="">— none —</option>
+      </select>
+      <div class="ch-preset" id="preset-info-${ch}">
+        <span class="name"></span>
+        <span class="num"></span>
+      </div>
+      <div class="ch-vol-bar" id="volbar-${ch}">
+        <div class="ch-vol-fill" id="volfill-${ch}" style="width:100%"></div>
+      </div>
+      <div class="ch-vol-val" id="volval-${ch}">1.00</div>
+      <div class="ch-activity">
+        <div class="meter" id="meter-${ch}">${'<div class="meter-dot"></div>'.repeat(16)}</div>
+        <span id="voices-${ch}">0/16</span>
+      </div>
+    `;
+
+    // Click strip to open detail
+    strip.addEventListener('click', (e) => {
+      if (e.target.tagName === 'SELECT' || e.target.tagName === 'BUTTON' || e.target.closest('.ch-vol-bar')) return;
+      openDetail(ch);
+    });
+
+    // Mute button
+    strip.querySelector(`#mute-${ch}`).addEventListener('click', (e) => {
+      e.stopPropagation();
+      const slot = rackState.slots[ch];
+      send({ type: 'slot_mute', channel: ch, value: slot.mute ? 0 : 1 });
+    });
+
+    // Solo button
+    strip.querySelector(`#solo-${ch}`).addEventListener('click', (e) => {
+      e.stopPropagation();
+      const slot = rackState.slots[ch];
+      send({ type: 'slot_solo', channel: ch, value: slot.solo ? 0 : 1 });
+    });
+
+    // Type select
+    strip.querySelector(`#type-${ch}`).addEventListener('change', (e) => {
+      e.stopPropagation();
+      const val = e.target.value;
+      if (val === '') {
+        send({ type: 'slot_clear', channel: ch });
+      } else {
+        send({ type: 'slot_set', channel: ch, instrument: val });
+      }
+    });
+
+    // Volume bar drag
+    setupVolBar(strip.querySelector(`#volbar-${ch}`), ch);
+
+    rack.appendChild(strip);
+  }
+  updateTypeDropdowns();
+}
+
+function setupVolBar(bar, ch) {
+  let dragging = false;
+
+  function setVol(e) {
+    const rect = bar.getBoundingClientRect();
+    let x = (e.clientX || e.touches[0].clientX) - rect.left;
+    let val = Math.max(0, Math.min(1, x / rect.width));
+    val = Math.round(val * 100) / 100;
+    send({ type: 'slot_volume', channel: ch, value: val });
+  }
+
+  bar.addEventListener('mousedown', (e) => { e.stopPropagation(); dragging = true; setVol(e); });
+  bar.addEventListener('touchstart', (e) => { e.stopPropagation(); dragging = true; setVol(e); }, { passive: true });
+  window.addEventListener('mousemove', (e) => { if (dragging) setVol(e); });
+  window.addEventListener('touchmove', (e) => { if (dragging) setVol(e); }, { passive: true });
+  window.addEventListener('mouseup', () => { dragging = false; });
+  window.addEventListener('touchend', () => { dragging = false; });
+}
+
+function updateRack() {
+  for (let ch = 0; ch < 16; ch++) {
+    const slot = rackState.slots[ch];
+    if (!slot) continue;
+    const strip = document.getElementById(`ch-${ch}`);
+    if (!strip) continue;
+
+    // Type dropdown
+    const sel = document.getElementById(`type-${ch}`);
+    if (sel && document.activeElement !== sel) {
+      sel.value = slot.active ? slot.type : '';
+    }
+
+    // Mute/Solo buttons
+    const muteBtn = document.getElementById(`mute-${ch}`);
+    const soloBtn = document.getElementById(`solo-${ch}`);
+    if (muteBtn) muteBtn.className = `ch-btn${slot.mute ? ' mute-on' : ''}`;
+    if (soloBtn) soloBtn.className = `ch-btn${slot.solo ? ' solo-on' : ''}`;
+
+    // Volume bar
+    const fill = document.getElementById(`volfill-${ch}`);
+    const vval = document.getElementById(`volval-${ch}`);
+    if (fill) fill.style.width = (slot.volume * 100) + '%';
+    if (vval) vval.textContent = slot.volume.toFixed(2);
+
+    // Preset info + activity from channel state
+    const presetInfo = document.getElementById(`preset-info-${ch}`);
+    const actInd = document.getElementById(`act-${ch}`);
+    const voicesEl = document.getElementById(`voices-${ch}`);
+    const meterEl = document.getElementById(`meter-${ch}`);
+
+    const cs = channelStates[ch];
+    if (cs && slot.active) {
+      if (presetInfo) {
+        presetInfo.querySelector('.name').textContent = cs.preset_name || '';
+        presetInfo.querySelector('.num').textContent = cs.preset_index !== undefined ? String(cs.preset_index).padStart(3, '0') : '';
+      }
+      if (actInd) actInd.className = `ch-btn active-indicator${cs.active_voices > 0 ? ' sounding' : ''}`;
+      if (voicesEl) voicesEl.textContent = `${cs.active_voices || 0}/16`;
+      if (meterEl) {
+        const dots = meterEl.children;
+        for (let d = 0; d < dots.length; d++) {
+          dots[d].className = `meter-dot${d < (cs.active_voices || 0) ? ' on' : ''}`;
+        }
+      }
+    } else {
+      if (presetInfo) {
+        presetInfo.querySelector('.name').textContent = '';
+        presetInfo.querySelector('.num').textContent = '';
+      }
+      if (actInd) actInd.className = 'ch-btn active-indicator';
+      if (voicesEl) voicesEl.textContent = '0/16';
+      if (meterEl) {
+        const dots = meterEl.children;
+        for (let d = 0; d < dots.length; d++) dots[d].className = 'meter-dot';
+      }
+    }
+
+    // Active detail highlight
+    strip.classList.toggle('active-detail', ch === activeDetail);
+  }
+}
+
+function updateTypeDropdowns() {
+  for (let ch = 0; ch < 16; ch++) {
+    const sel = document.getElementById(`type-${ch}`);
+    if (!sel) continue;
+    const curVal = sel.value;
+    sel.innerHTML = '<option value="">— none —</option>';
+    for (const t of instrumentTypes) {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      sel.appendChild(opt);
+    }
+    sel.value = curVal;
+  }
+}
+
+// ── Top Bar Updates ──────────────────────────────────────────────
+
+function updateTopBar() {
+  const masterSlider = document.getElementById('master-vol');
+  const masterVal = document.getElementById('master-val');
+  if (document.activeElement !== masterSlider) {
+    masterSlider.value = rackState.master_volume;
+  }
+  masterVal.textContent = rackState.master_volume.toFixed(2);
+}
+
+function updateMidiDropdown() {
+  const sel = document.getElementById('midi-select');
+  const curVal = sel.value;
+  sel.innerHTML = '<option value="">No Device</option>';
+  for (const d of midiDevices) {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = `${d.name} (${d.id})`;
+    sel.appendChild(opt);
+  }
+  sel.value = rackState.midi_device || curVal;
+}
+
+// Master volume
+document.getElementById('master-vol').addEventListener('input', (e) => {
+  const val = parseFloat(e.target.value);
+  document.getElementById('master-val').textContent = val.toFixed(2);
+  send({ type: 'master_volume', value: val });
+});
+
+// MIDI device
+document.getElementById('midi-select').addEventListener('change', (e) => {
+  send({ type: 'midi_device', value: e.target.value });
+});
+
+// ── Detail Pane ──────────────────────────────────────────────────
+
+function openDetail(ch) {
+  activeDetail = ch;
+  selectedFamily = 0;
+  channelStates[ch] = channelStates[ch] || null;
+  send({ type: 'ch_status', channel: ch });
+
+  const detail = document.getElementById('detail');
+  detail.classList.add('open');
+  renderDetailPane();
+  updateRack();
+}
+
+function closeDetail() {
+  send({ type: 'detail_close' });
+  activeDetail = -1;
+  document.getElementById('detail').classList.remove('open');
+  updateRack();
+}
+
+function renderDetailPane() {
+  if (activeDetail < 0) return;
+  const ch = activeDetail;
+  const slot = rackState.slots[ch];
+  const detail = document.getElementById('detail');
+
+  const typeName = slot.active ? (slot.type || 'Unknown') : 'Empty';
+
+  detail.innerHTML = `
+    <div class="detail-header">
+      <h2>CH ${ch + 1} — <span>${typeName}</span></h2>
+      <button class="detail-close" id="detail-close">&times;</button>
+    </div>
+    <div class="detail-body" id="detail-body"></div>
+  `;
+
+  document.getElementById('detail-close').addEventListener('click', closeDetail);
+
+  if (slot.active && slot.type === 'fm-synth') {
+    renderFMSynth(ch);
+  } else if (!slot.active) {
+    document.getElementById('detail-body').innerHTML = '<div style="color:var(--dim);text-align:center;padding:40px">No instrument loaded.<br>Select one from the dropdown.</div>';
+  }
+}
+
+function renderFMSynth(ch) {
+  const body = document.getElementById('detail-body');
+  const cs = channelStates[ch] || {};
+
+  body.innerHTML = `
+    <div class="preset-section">
+      <h3>Presets</h3>
+      <div class="preset-lcd" id="preset-lcd">
+        <span class="name" id="lcd-name">${cs.preset_name || '—'}</span>
+        <span class="num" id="lcd-num">${cs.preset_index !== undefined ? String(cs.preset_index).padStart(3, '0') : '---'}</span>
+      </div>
+      <div class="family-row" id="family-row"></div>
+      <div class="preset-grid" id="preset-grid"></div>
+    </div>
+
+    <div class="params-section">
+      <div class="params-header">
+        <h3>Parameters</h3>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span class="override-badge${cs.override ? ' on' : ''}" id="override-badge">OVERRIDE</span>
+          <button class="reset-btn" id="reset-btn">Reset</button>
+        </div>
+      </div>
+      <div class="params-grid" id="params-grid"></div>
+    </div>
+
+    <div class="keyboard-section">
+      <h3>Keyboard</h3>
+      <div class="note-display" id="note-display">&nbsp;</div>
+      <div class="keyboard" id="keyboard"></div>
+    </div>
+
+    <div class="detail-volume">
+      <label>Vol</label>
+      <input type="range" id="detail-vol" min="0" max="1" step="0.01" value="${cs.volume || 1}">
+      <span class="val" id="detail-vol-val">${(cs.volume || 1).toFixed(2)}</span>
+    </div>
+  `;
+
+  // Families
+  renderFamilies();
+  renderPresets();
+  renderParams(ch, cs);
+  renderKeyboard(ch);
+
+  // Reset button
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    send({ type: 'ch', channel: ch, path: '/param/reset' });
+  });
+
+  // Detail volume
+  document.getElementById('detail-vol').addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('detail-vol-val').textContent = val.toFixed(2);
+    send({ type: 'ch', channel: ch, path: '/volume', fargs: [val] });
+  });
+}
+
+function renderFamilies() {
+  const row = document.getElementById('family-row');
+  if (!row) return;
+  row.innerHTML = '';
+  FAMILIES.forEach((f, i) => {
+    const btn = document.createElement('button');
+    btn.className = `family-btn${i === selectedFamily ? ' active' : ''}`;
+    btn.textContent = f.name;
+    btn.addEventListener('click', () => {
+      selectedFamily = i;
+      renderFamilies();
+      renderPresets();
+    });
+    row.appendChild(btn);
+  });
+}
+
+function renderPresets() {
+  const grid = document.getElementById('preset-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const fam = FAMILIES[selectedFamily];
+  const cs = channelStates[activeDetail] || {};
+
+  for (let i = 0; i < fam.count; i++) {
+    const idx = fam.start + i;
+    const btn = document.createElement('button');
+    btn.className = `preset-btn${cs.preset_index === idx ? ' active' : ''}`;
+    btn.textContent = PRESET_NAMES[idx];
+    btn.title = `${idx}: ${PRESET_NAMES[idx]}`;
+    btn.addEventListener('click', () => {
+      send({ type: 'ch', channel: activeDetail, path: '/preset/load', iargs: [idx] });
+    });
+    grid.appendChild(btn);
+  }
+}
+
+function renderParams(ch, cs) {
+  const grid = document.getElementById('params-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  const params = cs.params || {};
+
+  PARAM_DEFS.forEach(p => {
+    const val = params[p.key] !== undefined ? params[p.key] : p.min;
+    const div = document.createElement('div');
+    div.className = 'param-control';
+    div.innerHTML = `
+      <div class="param-label">
+        <span class="name">${p.label}</span>
+        <span class="val" id="pval-${p.key}">${val.toFixed(3)}</span>
+      </div>
+      <input type="range" class="param-slider" id="pslider-${p.key}"
+        min="${p.min}" max="${p.max}" step="${p.step}" value="${val}">
+    `;
+    grid.appendChild(div);
+
+    const slider = div.querySelector(`#pslider-${p.key}`);
+    slider.addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      div.querySelector(`#pval-${p.key}`).textContent = v.toFixed(3);
+    });
+    slider.addEventListener('change', (e) => {
+      const v = parseFloat(e.target.value);
+      send({ type: 'ch', channel: ch, path: `/param/${p.key}`, fargs: [v] });
+    });
+  });
+}
+
+// ── Virtual Keyboard ─────────────────────────────────────────────
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+function renderKeyboard(ch) {
+  const kb = document.getElementById('keyboard');
+  if (!kb) return;
+  kb.innerHTML = '';
+
+  // C3 (48) to B4 (71) = 24 keys
+  const startNote = 48;
+  const endNote = 72;
+
+  // White keys
+  const whiteNotes = [];
+  for (let n = startNote; n < endNote; n++) {
+    const name = NOTE_NAMES[n % 12];
+    if (!name.includes('#')) whiteNotes.push(n);
+  }
+
+  const whiteWidth = 100 / whiteNotes.length;
+
+  // Place white keys
+  let whiteIdx = 0;
+  for (const n of whiteNotes) {
+    const key = document.createElement('div');
+    key.className = 'key white';
+    key.dataset.note = n;
+    key.style.width = whiteWidth + '%';
+    key.textContent = NOTE_NAMES[n % 12] + Math.floor(n / 12 - 1);
+    kb.appendChild(key);
+    whiteIdx++;
+  }
+
+  // Place black keys
+  whiteIdx = 0;
+  for (let i = 0; i < whiteNotes.length; i++) {
+    const n = whiteNotes[i];
+    const nextNote = n + 1;
+    if (nextNote < endNote && NOTE_NAMES[nextNote % 12].includes('#')) {
+      const key = document.createElement('div');
+      key.className = 'key black';
+      key.dataset.note = nextNote;
+      const leftPct = (i + 1) * whiteWidth - (whiteWidth * 0.3);
+      key.style.left = leftPct + '%';
+      key.textContent = NOTE_NAMES[nextNote % 12] + Math.floor(nextNote / 12 - 1);
+      kb.appendChild(key);
+    }
+  }
+
+  // Event handlers
+  let isDown = false;
+
+  function noteOn(n) {
+    if (pressedKeys.has(n)) return;
+    pressedKeys.add(n);
+    send({ type: 'note_on', channel: ch, note: n, velocity: 100 });
+    updateKeyHighlights();
+    const display = document.getElementById('note-display');
+    if (display) display.textContent = NOTE_NAMES[n % 12] + Math.floor(n / 12 - 1);
+  }
+
+  function noteOff(n) {
+    if (!pressedKeys.has(n)) return;
+    pressedKeys.delete(n);
+    send({ type: 'note_off', channel: ch, note: n });
+    updateKeyHighlights();
+    const display = document.getElementById('note-display');
+    if (display && pressedKeys.size === 0) display.innerHTML = '&nbsp;';
+  }
+
+  function getNote(e) {
+    const target = e.target.closest('.key');
+    return target ? parseInt(target.dataset.note) : -1;
+  }
+
+  kb.addEventListener('mousedown', (e) => {
+    isDown = true;
+    const n = getNote(e);
+    if (n >= 0) noteOn(n);
+  });
+
+  kb.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    const n = getNote(e);
+    // Release keys not under cursor
+    for (const k of pressedKeys) {
+      if (k !== n) noteOff(k);
+    }
+    if (n >= 0) noteOn(n);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isDown) {
+      isDown = false;
+      for (const k of [...pressedKeys]) noteOff(k);
+    }
+  });
+
+  // Touch
+  kb.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.dataset.note) noteOn(parseInt(el.dataset.note));
+    }
+  }, { passive: false });
+
+  kb.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const currentNotes = new Set();
+    for (const t of e.touches) {
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.dataset.note) currentNotes.add(parseInt(el.dataset.note));
+    }
+    for (const k of [...pressedKeys]) {
+      if (!currentNotes.has(k)) noteOff(k);
+    }
+    for (const n of currentNotes) noteOn(n);
+  }, { passive: false });
+
+  kb.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    // Check which touches remain
+    const remaining = new Set();
+    for (const t of e.touches) {
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.dataset.note) remaining.add(parseInt(el.dataset.note));
+    }
+    for (const k of [...pressedKeys]) {
+      if (!remaining.has(k)) noteOff(k);
+    }
+  }, { passive: false });
+}
+
+function updateKeyHighlights() {
+  const kb = document.getElementById('keyboard');
+  if (!kb) return;
+  for (const key of kb.querySelectorAll('.key')) {
+    const n = parseInt(key.dataset.note);
+    key.classList.toggle('pressed', pressedKeys.has(n));
+  }
+}
+
+// ── Detail Pane Live Update ──────────────────────────────────────
+
+function updateDetail() {
+  if (activeDetail < 0) return;
+  const cs = channelStates[activeDetail];
+  if (!cs) return;
+  const slot = rackState.slots[activeDetail];
+  if (!slot || !slot.active) return;
+
+  // LCD
+  const lcdName = document.getElementById('lcd-name');
+  const lcdNum = document.getElementById('lcd-num');
+  if (lcdName) lcdName.textContent = cs.preset_name || '—';
+  if (lcdNum) lcdNum.textContent = cs.preset_index !== undefined ? String(cs.preset_index).padStart(3, '0') : '---';
+
+  // Override badge
+  const badge = document.getElementById('override-badge');
+  if (badge) badge.className = `override-badge${cs.override ? ' on' : ''}`;
+
+  // Params — only update if slider not being dragged
+  if (cs.params) {
+    PARAM_DEFS.forEach(p => {
+      const slider = document.getElementById(`pslider-${p.key}`);
+      const valEl = document.getElementById(`pval-${p.key}`);
+      if (slider && document.activeElement !== slider) {
+        const v = cs.params[p.key];
+        if (v !== undefined) {
+          slider.value = v;
+          if (valEl) valEl.textContent = v.toFixed(3);
+        }
+      }
+    });
+  }
+
+  // Presets highlight
+  const grid = document.getElementById('preset-grid');
+  if (grid) {
+    for (const btn of grid.children) {
+      const fam = FAMILIES[selectedFamily];
+      const idx = fam.start + Array.from(grid.children).indexOf(btn);
+      btn.classList.toggle('active', cs.preset_index === idx);
+    }
+  }
+
+  // Detail volume
+  const detVol = document.getElementById('detail-vol');
+  const detVolVal = document.getElementById('detail-vol-val');
+  if (detVol && document.activeElement !== detVol && cs.volume !== undefined) {
+    detVol.value = cs.volume;
+    if (detVolVal) detVolVal.textContent = cs.volume.toFixed(2);
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+
+renderRack();
+connect();
+
+</script>
+</body>
+</html>

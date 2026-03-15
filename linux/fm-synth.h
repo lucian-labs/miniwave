@@ -1,0 +1,456 @@
+#ifndef FM_SYNTH_H
+#define FM_SYNTH_H
+
+#include "instruments.h"
+#include "presets.h"
+#include <math.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+#define FM_TAU          (2.0f * (float)M_PI)
+#define FM_MAX_VOICES   16
+#define FM_LIMITER_THRESHOLD 0.7f
+#define FM_LIMITER_CEILING   0.95f
+
+/* ── Envelope state ─────────────────────────────────────────────────── */
+
+typedef enum { FM_ENV_ATTACK, FM_ENV_DECAY, FM_ENV_SUSTAIN, FM_ENV_RELEASE } FMEnvState;
+
+/* ── Voice ──────────────────────────────────────────────────────────── */
+
+typedef struct {
+    int         active;
+    int         note;
+    float       freq;
+    float       velocity;
+    float       cp, mp;         /* carrier / modulator phase */
+    float       prev_mod;       /* feedback memory */
+    FMEnvState  env_state;
+    float       env_level;
+    float       env_time;
+    float       release_level;  /* level at note-off */
+    float       age;
+    int         preset_idx;
+} FMVoice;
+
+/* ── Live parameter overrides ───────────────────────────────────────── */
+
+typedef struct {
+    float carrier_ratio, mod_ratio, mod_index;
+    float attack, decay, sustain, release, feedback;
+    int   override;  /* 1 = use these instead of preset table */
+} FMSynthParams;
+
+/* ── Synth state ────────────────────────────────────────────────────── */
+
+typedef struct {
+    FMVoice       voices[FM_MAX_VOICES];
+    int           current_preset;
+    FMSynthParams live_params;
+    float         volume;        /* internal volume, default 1.0 */
+    float         limiter_env;   /* per-instance limiter envelope */
+} FMSynth;
+
+/* ── Helpers ────────────────────────────────────────────────────────── */
+
+static float fm_midi_to_freq(int note) {
+    return 440.0f * powf(2.0f, (note - 69) / 12.0f);
+}
+
+/* Per-instance soft-knee limiter */
+static inline float fm_limiter(FMSynth *s, float sample) {
+    float absval = fabsf(sample);
+
+    if (absval > s->limiter_env)
+        s->limiter_env += (absval - s->limiter_env) * 0.01f;
+    else
+        s->limiter_env += (absval - s->limiter_env) * 0.0001f;
+
+    float gain = 1.0f;
+    if (s->limiter_env > FM_LIMITER_THRESHOLD) {
+        gain = FM_LIMITER_THRESHOLD / s->limiter_env;
+    }
+
+    sample *= gain;
+
+    if (fabsf(sample) > FM_LIMITER_THRESHOLD) {
+        sample = tanhf(sample) * FM_LIMITER_CEILING;
+    }
+
+    return sample;
+}
+
+/* Copy preset values into live_params (without enabling override) */
+static void fm_load_preset_params(FMSynth *s, int idx) {
+    if (idx < 0 || idx >= NUM_PRESETS) return;
+    const FMPreset *p = &PRESETS[idx];
+    s->live_params.carrier_ratio = p->carrier_ratio;
+    s->live_params.mod_ratio     = p->mod_ratio;
+    s->live_params.mod_index     = p->mod_index;
+    s->live_params.attack        = p->attack;
+    s->live_params.decay         = p->decay;
+    s->live_params.sustain       = p->sustain;
+    s->live_params.release       = p->release;
+    s->live_params.feedback      = p->feedback;
+}
+
+/* ── Voice management ───────────────────────────────────────────────── */
+
+static void fm_note_on(FMSynth *s, int note, int vel) {
+    float freq = fm_midi_to_freq(note);
+    float velocity = vel / 127.0f;
+
+    /* Kill duplicate note */
+    for (int i = 0; i < FM_MAX_VOICES; i++) {
+        if (s->voices[i].active && s->voices[i].note == note) {
+            s->voices[i].active = 0;
+        }
+    }
+
+    /* Find free slot */
+    int slot = -1;
+    for (int i = 0; i < FM_MAX_VOICES; i++) {
+        if (!s->voices[i].active) { slot = i; break; }
+    }
+    /* Voice steal: oldest */
+    if (slot < 0) {
+        float oldest = 0;
+        slot = 0;
+        for (int i = 0; i < FM_MAX_VOICES; i++) {
+            if (s->voices[i].age > oldest) {
+                oldest = s->voices[i].age;
+                slot = i;
+            }
+        }
+    }
+
+    FMVoice *v = &s->voices[slot];
+    memset(v, 0, sizeof(*v));
+    v->active = 1;
+    v->note = note;
+    v->freq = freq;
+    v->velocity = velocity;
+    v->env_state = FM_ENV_ATTACK;
+    v->preset_idx = s->current_preset;
+}
+
+static void fm_note_off(FMSynth *s, int note) {
+    for (int i = 0; i < FM_MAX_VOICES; i++) {
+        FMVoice *v = &s->voices[i];
+        if (v->active && v->note == note && v->env_state != FM_ENV_RELEASE) {
+            v->env_state = FM_ENV_RELEASE;
+            v->release_level = v->env_level;
+            v->env_time = 0;
+        }
+    }
+}
+
+/* ── InstrumentType interface ───────────────────────────────────────── */
+
+static void fm_synth_init(void *state) {
+    FMSynth *s = (FMSynth *)state;
+    memset(s, 0, sizeof(*s));
+    s->current_preset = 0;
+    s->volume = 1.0f;
+    s->limiter_env = 0.0f;
+    fm_load_preset_params(s, 0);
+}
+
+static void fm_synth_destroy(void *state) {
+    (void)state;
+    /* Nothing to free — all inline */
+}
+
+static void fm_synth_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
+    FMSynth *s = (FMSynth *)state;
+    uint8_t type = status & 0xF0;
+
+    switch (type) {
+    case 0x90: /* Note On */
+        if (d2 > 0) fm_note_on(s, d1, d2);
+        else        fm_note_off(s, d1);
+        break;
+    case 0x80: /* Note Off */
+        fm_note_off(s, d1);
+        break;
+    case 0xB0: /* CC */
+        if (d1 == 0 || d1 == 32) {
+            /* Bank select — use as preset change */
+            int p = d2;
+            if (p >= 0 && p < NUM_PRESETS) {
+                s->current_preset = p;
+                fprintf(stderr, "[fm-synth] preset %d: %s\n", p, PRESET_NAMES[p]);
+            }
+        }
+        break;
+    case 0xC0: /* Program Change */
+        if (d1 < NUM_PRESETS) {
+            s->current_preset = d1;
+            fprintf(stderr, "[fm-synth] preset %d: %s\n", d1, PRESET_NAMES[d1]);
+        }
+        break;
+    }
+}
+
+static void fm_synth_render(void *state, float *stereo_buf, int frames, int sample_rate) {
+    FMSynth *s = (FMSynth *)state;
+    const float dt = 1.0f / (float)sample_rate;
+
+    for (int i = 0; i < frames; i++) {
+        float mix = 0.0f;
+
+        for (int v = 0; v < FM_MAX_VOICES; v++) {
+            FMVoice *vc = &s->voices[v];
+            if (!vc->active) continue;
+
+            const FMPreset *p = &PRESETS[vc->preset_idx];
+            float atk, dec, sus, rel, mi, fb, crf, mrf;
+            if (s->live_params.override) {
+                atk = s->live_params.attack;
+                dec = s->live_params.decay;
+                sus = s->live_params.sustain;
+                rel = s->live_params.release;
+                mi  = s->live_params.mod_index;
+                fb  = s->live_params.feedback;
+                crf = vc->freq * s->live_params.carrier_ratio;
+                mrf = vc->freq * s->live_params.mod_ratio;
+            } else {
+                atk = p->attack;
+                dec = p->decay;
+                sus = p->sustain;
+                rel = p->release;
+                mi  = p->mod_index;
+                fb  = p->feedback;
+                crf = vc->freq * p->carrier_ratio;
+                mrf = vc->freq * p->mod_ratio;
+            }
+
+            vc->age += dt;
+            vc->env_time += dt;
+
+            /* ADSR */
+            float env = 0.0f;
+            int dead = 0;
+
+            switch (vc->env_state) {
+            case FM_ENV_ATTACK: {
+                float e = (atk > 0.0001f) ? vc->env_time / atk : 1.0f;
+                if (e >= 1.0f) {
+                    vc->env_state = FM_ENV_DECAY;
+                    vc->env_time = 0;
+                    vc->env_level = 1.0f;
+                    env = 1.0f;
+                } else {
+                    vc->env_level = e;
+                    env = e;
+                }
+            } break;
+            case FM_ENV_DECAY: {
+                float t = (dec > 0.0001f) ? vc->env_time / dec : 1.0f;
+                if (t >= 1.0f) {
+                    vc->env_state = FM_ENV_SUSTAIN;
+                    env = sus;
+                } else {
+                    env = 1.0f - (1.0f - sus) * t;
+                }
+                vc->env_level = env;
+            } break;
+            case FM_ENV_SUSTAIN:
+                env = sus;
+                vc->env_level = sus;
+                break;
+            case FM_ENV_RELEASE: {
+                float t = (rel > 0.0001f) ? vc->env_time / rel : 1.0f;
+                if (t >= 1.0f) {
+                    dead = 1;
+                    env = 0;
+                } else {
+                    env = vc->release_level * (1.0f - t);
+                }
+            } break;
+            }
+
+            if (dead || vc->age > 30.0f) {
+                vc->active = 0;
+                continue;
+            }
+
+            /* 2-op FM synthesis */
+            float mod_out = sinf(vc->mp + fb * vc->prev_mod);
+            vc->prev_mod = mod_out;
+            float sample = sinf(vc->cp + mi * mod_out) * env * vc->velocity * 0.35f;
+
+            /* NaN guard */
+            if (!isfinite(sample) || !isfinite(vc->cp) || !isfinite(vc->mp)) {
+                vc->active = 0;
+                continue;
+            }
+
+            mix += sample;
+
+            /* Phase increment */
+            vc->cp += FM_TAU * crf * dt;
+            vc->mp += FM_TAU * mrf * dt;
+            if (vc->cp > FM_TAU) vc->cp -= FM_TAU;
+            if (vc->mp > FM_TAU) vc->mp -= FM_TAU;
+        }
+
+        mix *= s->volume;
+        mix = fm_limiter(s, mix);
+
+        stereo_buf[i * 2]     = mix;
+        stereo_buf[i * 2 + 1] = mix;
+    }
+}
+
+/* ── OSC helpers ────────────────────────────────────────────────────── */
+
+/* osc_pad4, osc_write_i32, osc_write_f32, osc_write_string are defined
+ * in miniwave.c before this header is included. */
+
+static void fm_synth_osc_handle(void *state, const char *sub_path,
+                                const int32_t *iargs, int ni,
+                                const float *fargs, int nf)
+{
+    FMSynth *s = (FMSynth *)state;
+
+    if (strcmp(sub_path, "/preset") == 0 && ni >= 1) {
+        int p = iargs[0];
+        if (p >= 0 && p < NUM_PRESETS) {
+            s->current_preset = p;
+            fprintf(stderr, "[fm-synth] OSC preset %d: %s\n", p, PRESET_NAMES[p]);
+        }
+    }
+    else if (strcmp(sub_path, "/volume") == 0 && nf >= 1) {
+        float vol = fargs[0];
+        if (vol < 0.0f) vol = 0.0f;
+        if (vol > 1.0f) vol = 1.0f;
+        s->volume = vol;
+        fprintf(stderr, "[fm-synth] OSC volume: %.2f\n", vol);
+    }
+    else if (strncmp(sub_path, "/param/", 7) == 0) {
+        const char *param = sub_path + 7;
+        if (strcmp(param, "reset") == 0) {
+            s->live_params.override = 0;
+            fprintf(stderr, "[fm-synth] OSC param override disabled\n");
+        }
+        else if (nf >= 1) {
+            float val = fargs[0];
+            int matched = 1;
+            if      (strcmp(param, "carrier_ratio") == 0) s->live_params.carrier_ratio = val;
+            else if (strcmp(param, "mod_ratio")     == 0) s->live_params.mod_ratio     = val;
+            else if (strcmp(param, "mod_index")     == 0) s->live_params.mod_index     = val;
+            else if (strcmp(param, "attack")        == 0) s->live_params.attack         = val;
+            else if (strcmp(param, "decay")         == 0) s->live_params.decay          = val;
+            else if (strcmp(param, "sustain")       == 0) s->live_params.sustain        = val;
+            else if (strcmp(param, "release")       == 0) s->live_params.release        = val;
+            else if (strcmp(param, "feedback")      == 0) s->live_params.feedback       = val;
+            else matched = 0;
+
+            if (matched) {
+                s->live_params.override = 1;
+                fprintf(stderr, "[fm-synth] OSC param %s = %.4f (override on)\n", param, val);
+            }
+        }
+    }
+    else if (strcmp(sub_path, "/preset/load") == 0 && ni >= 1) {
+        int p = iargs[0];
+        if (p >= 0 && p < NUM_PRESETS) {
+            s->current_preset = p;
+            fm_load_preset_params(s, p);
+            fprintf(stderr, "[fm-synth] OSC preset/load %d: %s\n", p, PRESET_NAMES[p]);
+        }
+    }
+}
+
+static int fm_synth_osc_status(void *state, uint8_t *buf, int max_len) {
+    FMSynth *s = (FMSynth *)state;
+    int pos = 0;
+    int w;
+
+    /* Address */
+    w = osc_write_string(buf + pos, max_len - pos, "/status");
+    if (w < 0) return 0;
+    pos += w;
+
+    /* Type tags: i s f i f f f f f f f f i */
+    w = osc_write_string(buf + pos, max_len - pos, ",isfiffffffffi");
+    if (w < 0) return 0;
+    pos += w;
+
+    /* preset_index (i) */
+    if (pos + 4 > max_len) return 0;
+    osc_write_i32(buf + pos, s->current_preset); pos += 4;
+
+    /* preset_name (s) */
+    const char *pname = (s->current_preset >= 0 && s->current_preset < NUM_PRESETS)
+                        ? PRESET_NAMES[s->current_preset] : "Unknown";
+    w = osc_write_string(buf + pos, max_len - pos, pname);
+    if (w < 0) return 0;
+    pos += w;
+
+    /* volume (f) */
+    if (pos + 4 > max_len) return 0;
+    osc_write_f32(buf + pos, s->volume); pos += 4;
+
+    /* override (i) */
+    if (pos + 4 > max_len) return 0;
+    osc_write_i32(buf + pos, s->live_params.override); pos += 4;
+
+    /* 8 params (f) */
+    const FMPreset *ep = &PRESETS[s->current_preset];
+    float params[8];
+    if (s->live_params.override) {
+        params[0] = s->live_params.carrier_ratio;
+        params[1] = s->live_params.mod_ratio;
+        params[2] = s->live_params.mod_index;
+        params[3] = s->live_params.attack;
+        params[4] = s->live_params.decay;
+        params[5] = s->live_params.sustain;
+        params[6] = s->live_params.release;
+        params[7] = s->live_params.feedback;
+    } else {
+        params[0] = ep->carrier_ratio;
+        params[1] = ep->mod_ratio;
+        params[2] = ep->mod_index;
+        params[3] = ep->attack;
+        params[4] = ep->decay;
+        params[5] = ep->sustain;
+        params[6] = ep->release;
+        params[7] = ep->feedback;
+    }
+    for (int i = 0; i < 8; i++) {
+        if (pos + 4 > max_len) return 0;
+        osc_write_f32(buf + pos, params[i]); pos += 4;
+    }
+
+    /* active_voices (i) */
+    if (pos + 4 > max_len) return 0;
+    int active = 0;
+    for (int v = 0; v < FM_MAX_VOICES; v++)
+        if (s->voices[v].active) active++;
+    osc_write_i32(buf + pos, active); pos += 4;
+
+    return pos;
+}
+
+/* ── Exported type descriptor ───────────────────────────────────────── */
+
+InstrumentType fm_synth_type = {
+    .name         = "fm-synth",
+    .display_name = "FM Synth (yama-bruh)",
+    .state_size   = sizeof(FMSynth),
+    .init         = fm_synth_init,
+    .destroy      = fm_synth_destroy,
+    .midi         = fm_synth_midi,
+    .render       = fm_synth_render,
+    .osc_handle   = fm_synth_osc_handle,
+    .osc_status   = fm_synth_osc_status,
+};
+
+#endif /* FM_SYNTH_H */
