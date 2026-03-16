@@ -72,6 +72,7 @@ static int osc_write_string(uint8_t *buf, int max, const char *str) {
 
 #include "instruments.h"
 #include "fm-synth.h"
+#include "ym2413.h"
 
 /* ── Constants ──────────────────────────────────────────────────────── */
 
@@ -189,6 +190,7 @@ static void rack_init(void) {
 
     /* Register built-in types */
     rack_register_type(&fm_synth_type);
+    rack_register_type(&ym2413_type);
 }
 
 static int rack_set_slot(int channel, const char *type_name) {
@@ -926,7 +928,34 @@ static int build_ch_status_json(int ch, char *buf, int max) {
         return snprintf(buf, (size_t)max,
             "{\"type\":\"ch_status\",\"channel\":%d}", ch);
 
-    /* For FM synth, read the state directly */
+    InstrumentType *itype = g_type_registry[slot->type_idx];
+
+    /* Dispatch by instrument type */
+    if (strcmp(itype->name, "ym2413") == 0) {
+        YM2413State *y = (YM2413State *)slot->state;
+        const char *inst_names[] = {
+            "Custom","Violin","Guitar","Piano","Flute","Clarinet","Oboe",
+            "Trumpet","Organ","Horn","Synthesizer","Harpsichord",
+            "Vibraphone","Synth Bass","Acoustic Bass","Electric Guitar"
+        };
+        const char *iname = (y->current_instrument >= 0 && y->current_instrument <= 15)
+                            ? inst_names[y->current_instrument] : "Unknown";
+        int active_ch = 0;
+        int nch = y->rhythm_mode ? 6 : 9;
+        for (int i = 0; i < nch; i++)
+            if (y->channels[i].key_on) active_ch++;
+
+        return snprintf(buf, (size_t)max,
+            "{\"type\":\"ch_status\",\"channel\":%d,"
+            "\"instrument_type\":\"ym2413\","
+            "\"preset_index\":%d,\"preset_name\":\"%s\","
+            "\"rhythm_mode\":%d,"
+            "\"active_voices\":%d}",
+            ch, y->current_instrument, iname,
+            y->rhythm_mode, active_ch);
+    }
+
+    /* Default: FM synth */
     FMSynth *s = (FMSynth *)slot->state;
     const char *pname = (s->current_preset >= 0 && s->current_preset < NUM_PRESETS)
                         ? PRESET_NAMES[s->current_preset] : "Unknown";
@@ -959,6 +988,7 @@ static int build_ch_status_json(int ch, char *buf, int max) {
 
     return snprintf(buf, (size_t)max,
         "{\"type\":\"ch_status\",\"channel\":%d,"
+        "\"instrument_type\":\"fm-synth\","
         "\"preset_index\":%d,\"preset_name\":\"%s\","
         "\"volume\":%.4f,\"override\":%d,"
         "\"params\":{"

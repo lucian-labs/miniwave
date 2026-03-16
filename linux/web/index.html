@@ -941,6 +941,8 @@ function renderDetailPane() {
 
   if (slot.active && slot.type === 'fm-synth') {
     renderFMSynth(ch);
+  } else if (slot.active && slot.type === 'ym2413') {
+    renderYM2413(ch);
   } else if (!slot.active) {
     document.getElementById('detail-body').innerHTML = '<div style="color:var(--dim);text-align:center;padding:40px">No instrument loaded.<br>Select one from the dropdown.</div>';
   }
@@ -1002,6 +1004,68 @@ function renderFMSynth(ch) {
     document.getElementById('detail-vol-val').textContent = val.toFixed(2);
     send({ type: 'ch', channel: ch, path: '/volume', fargs: [val] });
   });
+}
+
+// ── YM2413 OPLL Detail Pane ──────────────────────────────────────
+
+const OPLL_PATCHES = [
+  'Custom','Violin','Guitar','Piano','Flute','Clarinet','Oboe',
+  'Trumpet','Organ','Horn','Synthesizer','Harpsichord',
+  'Vibraphone','Synth Bass','Acoustic Bass','Electric Guitar'
+];
+
+function renderYM2413(ch) {
+  const body = document.getElementById('detail-body');
+  const cs = channelStates[ch] || {};
+
+  body.innerHTML = `
+    <div class="preset-section">
+      <h3>OPLL Patches</h3>
+      <div class="preset-lcd" id="preset-lcd">
+        <span class="name" id="lcd-name">${cs.preset_name || '—'}</span>
+        <span class="num" id="lcd-num">${cs.preset_index !== undefined ? String(cs.preset_index).padStart(2, '0') : '--'}</span>
+      </div>
+      <div class="preset-grid opll-grid" id="opll-patches"></div>
+    </div>
+
+    <div class="params-section">
+      <div class="params-header">
+        <h3>Mode</h3>
+        <button class="reset-btn${cs.rhythm_mode ? ' active' : ''}" id="rhythm-btn" style="background:${cs.rhythm_mode ? 'var(--accent)' : 'var(--card)'}">
+          RHYTHM ${cs.rhythm_mode ? 'ON' : 'OFF'}
+        </button>
+      </div>
+      <div style="color:var(--dim);font-size:11px;padding:4px 0">
+        ${cs.rhythm_mode ? '6 melody + BD/SD/HH/TM/TC • low notes trigger drums' : '9 melody channels'}
+      </div>
+    </div>
+
+    <div class="keyboard-section">
+      <h3>Keyboard</h3>
+      <div class="note-display" id="note-display">&nbsp;</div>
+      <div class="keyboard" id="keyboard"></div>
+    </div>
+  `;
+
+  // Patch buttons
+  const grid = document.getElementById('opll-patches');
+  OPLL_PATCHES.forEach((name, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn' + (cs.preset_index === i ? ' active' : '');
+    btn.textContent = name;
+    btn.addEventListener('click', () => {
+      send({ type: 'ch', channel: ch, path: '/instrument', iargs: [i] });
+    });
+    grid.appendChild(btn);
+  });
+
+  // Rhythm toggle
+  document.getElementById('rhythm-btn').addEventListener('click', () => {
+    send({ type: 'ch', channel: ch, path: '/rhythm', iargs: [cs.rhythm_mode ? 0 : 1] });
+  });
+
+  // Keyboard
+  renderKeyboard(ch);
 }
 
 function renderFamilies() {
