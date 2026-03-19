@@ -95,6 +95,13 @@ html, body {
 }
 .bus-only-label input { accent-color: var(--accent); margin: 0; }
 
+.audio-badge {
+  font-size: 9px; font-weight: bold; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 3px; margin-left: 6px;
+  background: var(--border); color: var(--dim);
+}
+.audio-badge.jack { background: var(--good); color: #000; }
+
 .status-dot {
   width: 10px;
   height: 10px;
@@ -531,6 +538,7 @@ html, body {
     <label class="bus-only-label" title="Mute local audio — send only to waveOS bus">
       <input type="checkbox" id="bus-only-cb"> Bus Only
     </label>
+    <span id="audio-badge" class="audio-badge">ALSA</span>
     <div class="status-dot" id="status-dot"></div>
   </div>
 </div>
@@ -624,6 +632,12 @@ function connect() {
   evtSource.onopen = () => {
     document.getElementById('status-dot').classList.add('connected');
     if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+
+    // Re-send MIDI device on reconnect (server may have restarted)
+    const sel = document.getElementById('midi-select');
+    if (sel && sel.value) {
+      setTimeout(() => send({ type: 'midi_device', value: sel.value }), 500);
+    }
   };
 
   evtSource.onerror = () => {
@@ -664,6 +678,8 @@ function handleMessage(data) {
       rackState.slots = data.slots;
       rackState.master_volume = data.master_volume;
       rackState.midi_device = data.midi_device;
+      rackState.audio_backend = data.audio_backend;
+      rackState.local_mute = data.local_mute;
       updateRack();
       updateTopBar();
       break;
@@ -867,11 +883,23 @@ function updateTopBar() {
     masterSlider.value = rackState.master_volume;
   }
   masterVal.textContent = rackState.master_volume.toFixed(2);
+
+  // Audio backend badge
+  const badge = document.getElementById('audio-badge');
+  const backend = rackState.audio_backend || 'ALSA';
+  badge.textContent = backend;
+  badge.className = 'audio-badge' + (backend === 'JACK' ? ' jack' : '');
+
+  // Sync local_mute checkbox
+  const cb = document.getElementById('bus-only-cb');
+  if (document.activeElement !== cb) {
+    cb.checked = !!rackState.local_mute;
+  }
 }
 
 function updateMidiDropdown() {
   const sel = document.getElementById('midi-select');
-  const curVal = sel.value;
+  const prevVal = sel.value;
   sel.innerHTML = '<option value="">No Device</option>';
   for (const d of midiDevices) {
     const opt = document.createElement('option');
@@ -879,7 +907,23 @@ function updateMidiDropdown() {
     opt.textContent = `${d.name} (${d.id})`;
     sel.appendChild(opt);
   }
-  sel.value = rackState.midi_device || curVal;
+
+  // Match by server-reported name (contains "client:port") or keep previous
+  const serverDev = rackState.midi_device || '';
+  let matched = false;
+  for (const d of midiDevices) {
+    if (serverDev && serverDev.includes(d.id)) {
+      sel.value = d.id;
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) sel.value = prevVal;
+
+  // If server has no MIDI but we had one selected, re-send it
+  if (!serverDev && prevVal && prevVal !== '') {
+    send({ type: 'midi_device', value: prevVal });
+  }
 }
 
 // Master volume

@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <alsa/asoundlib.h>
+#include <jack/jack.h>
 
 /* ── OSC helpers (defined before fm-synth.h which uses them) ────────── */
 
@@ -122,6 +123,10 @@ static void sighandler(int sig) {
     (void)sig;
     g_quit = 1;
 }
+
+/* ── Audio backend flag (set at startup) ────────────────────────────── */
+
+static int g_use_jack = 0; /* 1 = JACK active, 0 = ALSA */
 
 /* ── Master Limiter ─────────────────────────────────────────────────── */
 
@@ -962,8 +967,11 @@ static int build_rack_status_json(char *buf, int max) {
     }
 
     pos += snprintf(buf + pos, (size_t)(max - pos),
-        "],\"master_volume\":%.4f,\"midi_device\":\"%s\"}",
-        (double)g_rack.master_volume, g_midi_device_name);
+        "],\"master_volume\":%.4f,\"midi_device\":\"%s\","
+        "\"audio_backend\":\"%s\",\"local_mute\":%d}",
+        (double)g_rack.master_volume, g_midi_device_name,
+        g_use_jack ? "JACK" : "ALSA",
+        g_rack.local_mute);
 
     return pos;
 }
@@ -1594,6 +1602,179 @@ static void usage(const char *prog) {
         "  -h        Help\n", prog);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  JACK Audio Backend
+ *  Preferred over ALSA — allows PipeWire routing between miniwave
+ *  and WaveLoop X1 without the shared memory bus.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+typedef struct {
+    jack_client_t *client;
+    jack_port_t   *out_L;
+    jack_port_t   *out_R;
+    float         *mix_buf;     /* interleaved stereo, allocated at activation */
+    float         *slot_buf;    /* per-slot render scratch */
+    int            buf_frames;  /* max frames (jack buffer size) */
+    WaveosBus     *bus;
+    int            bus_slot;
+} JackCtx;
+
+static JackCtx g_jack = {0};
+
+/* Shared render: mix all active slots into interleaved stereo buffer.
+ * Called from both JACK process callback and ALSA loop. Lock-free. */
+static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_rate) {
+    memset(mix_buf, 0, sizeof(float) * (size_t)(frames * CHANNELS));
+
+    int any_solo = 0;
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        if (g_rack.slots[i].active && g_rack.slots[i].solo) {
+            any_solo = 1;
+            break;
+        }
+    }
+
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        RackSlot *slot = &g_rack.slots[i];
+        if (!slot->active || !slot->state) continue;
+        if (slot->mute) continue;
+        if (any_solo && !slot->solo) continue;
+
+        InstrumentType *itype = g_type_registry[slot->type_idx];
+        memset(slot_buf, 0, sizeof(float) * (size_t)(frames * CHANNELS));
+        itype->render(slot->state, slot_buf, frames, sample_rate);
+
+        float vol = slot->volume;
+        for (int j = 0; j < frames * CHANNELS; j++) {
+            mix_buf[j] += slot_buf[j] * vol;
+        }
+    }
+
+    float mv = g_rack.master_volume;
+    for (int j = 0; j < frames * CHANNELS; j++) {
+        mix_buf[j] *= mv;
+        mix_buf[j] = master_limiter(mix_buf[j]);
+    }
+}
+
+/* JACK process callback — realtime thread, no malloc/printf/mutex */
+static int jack_process_cb(jack_nframes_t nframes, void *arg) {
+    JackCtx *jctx = (JackCtx *)arg;
+
+    float *out_L = (float *)jack_port_get_buffer(jctx->out_L, nframes);
+    float *out_R = (float *)jack_port_get_buffer(jctx->out_R, nframes);
+
+    int frames = (int)nframes;
+    if (frames > jctx->buf_frames) frames = jctx->buf_frames;
+
+    render_mix(jctx->mix_buf, jctx->slot_buf, frames,
+               (int)jack_get_sample_rate(jctx->client));
+
+    /* Write to bus if available */
+    if (jctx->bus && jctx->bus_slot >= 0) {
+        bus_write(jctx->bus, jctx->bus_slot, jctx->mix_buf, frames);
+    }
+
+    /* De-interleave to JACK planar buffers (or silence if local_mute) */
+    if (g_rack.local_mute) {
+        memset(out_L, 0, sizeof(float) * nframes);
+        memset(out_R, 0, sizeof(float) * nframes);
+    } else {
+        for (int i = 0; i < frames; i++) {
+            out_L[i] = jctx->mix_buf[i * 2];
+            out_R[i] = jctx->mix_buf[i * 2 + 1];
+        }
+    }
+
+    return 0;
+}
+
+static void jack_shutdown_cb(void *arg) {
+    (void)arg;
+    g_jack.client = NULL;
+    fprintf(stderr, "[miniwave] JACK server shut down\n");
+    g_quit = 1;
+}
+
+/* Try to open JACK. Returns 0 on success, -1 on failure. */
+static int jack_init(void) {
+    jack_status_t status;
+    g_jack.client = jack_client_open("miniwave", JackNoStartServer, &status);
+    if (!g_jack.client) {
+        fprintf(stderr, "[miniwave] JACK not available (status=0x%x), using ALSA\n",
+                (unsigned)status);
+        return -1;
+    }
+
+    jack_set_process_callback(g_jack.client, jack_process_cb, &g_jack);
+    jack_on_shutdown(g_jack.client, jack_shutdown_cb, NULL);
+
+    g_jack.out_L = jack_port_register(g_jack.client, "output_L",
+        JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+    g_jack.out_R = jack_port_register(g_jack.client, "output_R",
+        JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+
+    if (!g_jack.out_L || !g_jack.out_R) {
+        fprintf(stderr, "[miniwave] can't register JACK ports\n");
+        jack_client_close(g_jack.client);
+        g_jack.client = NULL;
+        return -1;
+    }
+
+    /* Allocate render buffers sized to JACK's max buffer */
+    g_jack.buf_frames = (int)jack_get_buffer_size(g_jack.client);
+    g_jack.mix_buf  = calloc((size_t)(g_jack.buf_frames * CHANNELS), sizeof(float));
+    g_jack.slot_buf = calloc((size_t)(g_jack.buf_frames * CHANNELS), sizeof(float));
+
+    if (!g_jack.mix_buf || !g_jack.slot_buf) {
+        fprintf(stderr, "[miniwave] can't alloc JACK buffers\n");
+        jack_client_close(g_jack.client);
+        g_jack.client = NULL;
+        return -1;
+    }
+
+    fprintf(stderr, "[miniwave] JACK client '%s' @ %uHz buf=%d\n",
+            jack_get_client_name(g_jack.client),
+            jack_get_sample_rate(g_jack.client),
+            g_jack.buf_frames);
+    return 0;
+}
+
+/* Activate JACK and auto-connect to system playback */
+static int jack_start(void) {
+    if (!g_jack.client) return -1;
+
+    if (jack_activate(g_jack.client) != 0) {
+        fprintf(stderr, "[miniwave] can't activate JACK client\n");
+        return -1;
+    }
+
+    /* Auto-connect to system playback */
+    const char **ports = jack_get_ports(g_jack.client, NULL, NULL,
+        JackPortIsPhysical | JackPortIsInput);
+    if (ports) {
+        if (ports[0])
+            jack_connect(g_jack.client, jack_port_name(g_jack.out_L), ports[0]);
+        if (ports[1])
+            jack_connect(g_jack.client, jack_port_name(g_jack.out_R), ports[1]);
+        jack_free(ports);
+    }
+
+    return 0;
+}
+
+static void jack_cleanup(void) {
+    if (g_jack.client) {
+        jack_deactivate(g_jack.client);
+        jack_client_close(g_jack.client);
+        g_jack.client = NULL;
+    }
+    free(g_jack.mix_buf);
+    free(g_jack.slot_buf);
+    g_jack.mix_buf = NULL;
+    g_jack.slot_buf = NULL;
+}
+
 /* ── Main ───────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
@@ -1647,18 +1828,24 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* ── ALSA Audio ────────────────────────────────────────────── */
+    /* ── Audio Backend: try JACK first, fall back to ALSA ─────── */
 
+    int use_jack = 0;
     snd_pcm_t *pcm = NULL;
-    int err = snd_pcm_open(&pcm, audio_dev, SND_PCM_STREAM_PLAYBACK, 0);
-    if (err < 0) {
-        fprintf(stderr, "[miniwave] ERROR: can't open audio %s: %s\n",
-                audio_dev, snd_strerror(err));
-        if (g_seq) { snd_seq_close(g_seq); g_seq = NULL; }
-        return 1;
-    }
 
-    {
+    if (jack_init() == 0) {
+        use_jack = 1;
+        g_use_jack = 1;
+    } else {
+        /* Fall back to ALSA */
+        int err = snd_pcm_open(&pcm, audio_dev, SND_PCM_STREAM_PLAYBACK, 0);
+        if (err < 0) {
+            fprintf(stderr, "[miniwave] ERROR: can't open audio %s: %s\n",
+                    audio_dev, snd_strerror(err));
+            if (g_seq) { snd_seq_close(g_seq); g_seq = NULL; }
+            return 1;
+        }
+
         snd_pcm_hw_params_t *hw;
         snd_pcm_hw_params_alloca(&hw);
         snd_pcm_hw_params_any(pcm, hw);
@@ -1682,7 +1869,7 @@ int main(int argc, char *argv[]) {
 
         snd_pcm_hw_params_get_period_size(hw, &ps, NULL);
         period_size = (int)ps;
-        fprintf(stderr, "[miniwave] audio: %s @ %uHz period=%d\n",
+        fprintf(stderr, "[miniwave] audio: ALSA %s @ %uHz period=%d\n",
                 audio_dev, rate, period_size);
     }
 
@@ -1726,17 +1913,30 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* ── Audio buffers ─────────────────────────────────────────── */
-
-    int16_t *audio_buf = calloc((size_t)(period_size * CHANNELS), sizeof(int16_t));
-    float   *mix_buf   = calloc((size_t)(period_size * CHANNELS), sizeof(float));
-    float   *slot_buf  = calloc((size_t)(period_size * CHANNELS), sizeof(float));
-    if (!audio_buf || !mix_buf || !slot_buf) {
-        fprintf(stderr, "[miniwave] ERROR: alloc failed\n");
-        goto cleanup;
+    /* Pass bus to JACK context */
+    if (use_jack) {
+        g_jack.bus = bus;
+        g_jack.bus_slot = bus_slot;
     }
 
-    fprintf(stderr, "[miniwave] running [ALSA]%s%s — %d types registered\n",
+    /* ── Audio buffers (ALSA path only) ───────────────────────── */
+
+    int16_t *audio_buf = NULL;
+    float   *mix_buf   = NULL;
+    float   *slot_buf  = NULL;
+
+    if (!use_jack) {
+        audio_buf = calloc((size_t)(period_size * CHANNELS), sizeof(int16_t));
+        mix_buf   = calloc((size_t)(period_size * CHANNELS), sizeof(float));
+        slot_buf  = calloc((size_t)(period_size * CHANNELS), sizeof(float));
+        if (!audio_buf || !mix_buf || !slot_buf) {
+            fprintf(stderr, "[miniwave] ERROR: alloc failed\n");
+            goto cleanup;
+        }
+    }
+
+    fprintf(stderr, "[miniwave] running [%s]%s%s — %d types registered\n",
+            use_jack ? "JACK" : "ALSA",
             (bus && bus_slot >= 0) ? " [BUS]" : "",
             (http_port > 0) ? " [HTTP]" : "",
             g_n_types);
@@ -1782,72 +1982,45 @@ int main(int argc, char *argv[]) {
 
     /* ── Audio render loop ─────────────────────────────────────── */
 
-    while (!g_quit) {
-        /* Zero the mix buffer */
-        memset(mix_buf, 0, sizeof(float) * (size_t)(period_size * CHANNELS));
+    if (use_jack) {
+        /* JACK drives rendering via process callback — just activate and wait */
+        if (jack_start() != 0) {
+            fprintf(stderr, "[miniwave] ERROR: JACK activate failed\n");
+            goto cleanup;
+        }
 
-        /* Check if any slot has solo enabled */
-        int any_solo = 0;
-        for (int i = 0; i < MAX_SLOTS; i++) {
-            if (g_rack.slots[i].active && g_rack.slots[i].solo) {
-                any_solo = 1;
-                break;
+        while (!g_quit) {
+            usleep(50000); /* 50ms idle — JACK callback does the work */
+        }
+    } else {
+        /* ALSA render loop — push audio ourselves */
+        while (!g_quit) {
+            render_mix(mix_buf, slot_buf, period_size, SAMPLE_RATE);
+
+            /* Write to bus if available */
+            if (bus && bus_slot >= 0) {
+                bus_write(bus, bus_slot, mix_buf, period_size);
             }
-        }
 
-        /* Render each active slot */
-        for (int i = 0; i < MAX_SLOTS; i++) {
-            RackSlot *slot = &g_rack.slots[i];
-            if (!slot->active || !slot->state) continue;
-            if (slot->mute) continue;
-            if (any_solo && !slot->solo) continue;
-
-            InstrumentType *itype = g_type_registry[slot->type_idx];
-
-            /* Clear slot render buffer */
-            memset(slot_buf, 0, sizeof(float) * (size_t)(period_size * CHANNELS));
-
-            /* Render instrument into slot buffer */
-            itype->render(slot->state, slot_buf, period_size, SAMPLE_RATE);
-
-            /* Mix into main buffer with slot volume */
-            float vol = slot->volume;
-            for (int j = 0; j < period_size * CHANNELS; j++) {
-                mix_buf[j] += slot_buf[j] * vol;
+            /* Convert to S16 for ALSA (silence if local_mute) */
+            if (g_rack.local_mute) {
+                memset(audio_buf, 0, (size_t)(period_size * CHANNELS) * sizeof(int16_t));
+            } else {
+                for (int j = 0; j < period_size * CHANNELS; j++) {
+                    float s = mix_buf[j];
+                    if (s > 1.0f) s = 1.0f;
+                    if (s < -1.0f) s = -1.0f;
+                    audio_buf[j] = (int16_t)(s * 32000.0f);
+                }
             }
-        }
 
-        /* Apply master volume and limiter */
-        float mv = g_rack.master_volume;
-        for (int j = 0; j < period_size * CHANNELS; j++) {
-            mix_buf[j] *= mv;
-            mix_buf[j] = master_limiter(mix_buf[j]);
-        }
-
-        /* Write to bus if available */
-        if (bus && bus_slot >= 0) {
-            bus_write(bus, bus_slot, mix_buf, period_size);
-        }
-
-        /* Convert to S16 for ALSA (silence if local_mute — bus-only mode) */
-        if (g_rack.local_mute) {
-            memset(audio_buf, 0, (size_t)(period_size * CHANNELS) * sizeof(int16_t));
-        } else {
-            for (int j = 0; j < period_size * CHANNELS; j++) {
-                float s = mix_buf[j];
-                if (s > 1.0f) s = 1.0f;
-                if (s < -1.0f) s = -1.0f;
-                audio_buf[j] = (int16_t)(s * 32000.0f);
-            }
-        }
-
-        /* Write to ALSA */
-        snd_pcm_sframes_t frames = snd_pcm_writei(pcm, audio_buf, (snd_pcm_uframes_t)period_size);
-        if (frames < 0) {
-            frames = snd_pcm_recover(pcm, (int)frames, 1);
+            snd_pcm_sframes_t frames = snd_pcm_writei(pcm, audio_buf, (snd_pcm_uframes_t)period_size);
             if (frames < 0) {
-                fprintf(stderr, "[miniwave] audio write error: %s\n",
-                        snd_strerror((int)frames));
+                frames = snd_pcm_recover(pcm, (int)frames, 1);
+                if (frames < 0) {
+                    fprintf(stderr, "[miniwave] audio write error: %s\n",
+                            snd_strerror((int)frames));
+                }
             }
         }
     }
@@ -1882,6 +2055,7 @@ cleanup:
         snd_seq_close(g_seq);
         g_seq = NULL;
     }
+    jack_cleanup();
     if (pcm) snd_pcm_close(pcm);
     free(audio_buf);
     free(mix_buf);
