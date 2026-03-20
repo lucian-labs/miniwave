@@ -277,6 +277,7 @@ static void usage(const char *prog) {
 int main(int argc, char *argv[]) {
     signal(SIGINT, sighandler);
     signal(SIGTERM, sighandler);
+    signal(SIGPIPE, SIG_IGN);  /* ignore broken pipe from dead SSE clients */
 
     char midi_dev[64] = "";
     char audio_dev[64] = "default";
@@ -309,6 +310,7 @@ int main(int argc, char *argv[]) {
     rack_init();
     state_init_path();
     state_load();
+    keyseq_wire_graph_broadcast();
 
     for (int i = 0; i < pre_config; i++) {
         if (!g_rack.slots[i].active)

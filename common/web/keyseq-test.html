@@ -5,7 +5,7 @@
 <title>KeySeq Expression Tester</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-:root { --bg: #0d0d0d; --panel: #1a1a2e; --card: #16213e; --accent: #e94560; --good: #00d4aa; --text: #e0e0e0; --dim: #666; --border: #2a2a4a; }
+:root { --bg: #0d0d0d; --panel: #1a1a2e; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #e0e0e0; --dim: #666; --border: #2a2a4a; }
 html, body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; height: 100%; overflow: hidden; }
 
 #page { display: flex; flex-direction: column; height: 100%; padding: 16px 20px; gap: 12px; }
@@ -73,15 +73,26 @@ button.send { background: var(--good); color: #000; }
 .expr-row input { flex: 1; }
 .expr-row.disabled input { opacity: 0.3; pointer-events: none; }
 .expr-row.disabled .elabel { opacity: 0.3; }
+.expr-row .rm-btn { width: 18px; height: 18px; padding: 0; font-size: 12px; line-height: 18px; text-align: center; border-radius: 3px; background: transparent; border: 1px solid var(--border); color: var(--dim); cursor: pointer; flex-shrink: 0; }
+.expr-row .rm-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 #preview-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 #preview-wrap h3 { padding: 10px 12px 6px; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0; margin: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
 #preview-wrap h3 .stats { color: var(--dim); font-weight: normal; margin-left: auto; }
 #preview { flex: 1; overflow-y: auto; padding: 8px 12px; font-size: 12px; white-space: pre-wrap; line-height: 1.6; }
-.note-line .step { color: var(--dim); display: inline-block; width: 28px; text-align: right; margin-right: 8px; }
-.note-line .note { color: var(--good); display: inline-block; width: 72px; }
-.note-line .vel { color: var(--accent); }
-.note-line .time { color: var(--dim); }
+.pv-header, .note-line { display: flex; gap: 0; }
+.pv-header { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; padding-bottom: 4px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+.pv-col-i { width: 32px; text-align: right; flex-shrink: 0; padding-right: 8px; }
+.pv-col-n { width: 72px; flex-shrink: 0; }
+.pv-col-v { width: 52px; flex-shrink: 0; }
+.pv-col-t { width: 52px; flex-shrink: 0; }
+.pv-col-g { width: 52px; flex-shrink: 0; }
+.pv-col-b { width: 52px; flex-shrink: 0; }
+.pv-col-x { flex: 1; }
+.note-line .pv-col-i { color: var(--dim); }
+.note-line .pv-col-n { color: var(--good); }
+.note-line .pv-col-v { color: var(--accent); }
+.note-line .pv-col-t, .note-line .pv-col-g, .note-line .pv-col-b { color: var(--dim); }
 
 #dsl-section { flex-shrink: 0; }
 #dsl-section textarea { height: 48px; }
@@ -111,6 +122,7 @@ button.send { background: var(--good); color: #000; }
 <div id="page">
 
 <div id="header">
+  <a href="/" style="color:var(--dim);text-decoration:none;font-size:16px;line-height:1;padding:2px 4px" title="Back to main panel">&lsaquo;</a>
   <h1>KeySeq</h1>
   <div class="ch-nav">
     <button id="ch-prev" title="Prev channel (Cmd+[)">&lsaquo;</button>
@@ -163,8 +175,8 @@ button.send { background: var(--good); color: #000; }
           <input type="text" id="step-t" value="0.125">
         </div>
         <div>
-          <label>Gate (beats)</label>
-          <input type="text" id="gate-t" value="">
+          <label>Gate (ratio)</label>
+          <input type="text" id="gate-t" value="" placeholder="0.8">
         </div>
       </div>
     </div>
@@ -184,6 +196,7 @@ button.send { background: var(--good); color: #000; }
       <div class="expr-row disabled" id="row-t"><span class="elabel">t</span><input type="text" id="expr-t" value="" placeholder="step time expr"></div>
       <div class="expr-row disabled" id="row-g"><span class="elabel">g</span><input type="text" id="expr-g" value="" placeholder="gate time expr"></div>
       <p style="color:var(--dim);font-size:10px;margin-top:4px">n v t g i root rv time bu gate held dt &nbsp; + - * / % > < >= <= &nbsp; if(c,a,b) sin cos abs rand noise(x[,y,z]) pi tau</p>
+      <div id="seq-params"></div>
       <div class="expr-row" style="margin-top:6px">
         <span class="elabel" style="color:var(--mute, #e94560);font-size:10px">end</span>
         <input type="text" id="expr-end" value="v<=0" placeholder="end condition e.g. v<=0, n<root" style="font-size:11px">
@@ -196,11 +209,17 @@ button.send { background: var(--good); color: #000; }
         <span class="elabel" style="color:var(--good)">&cent;</span>
         <input type="text" id="expr-frame" value="" placeholder="e.g. sin(time*6)*50">
       </div>
+      <div id="elem-params"></div>
       <p style="color:var(--dim);font-size:10px;margin-top:4px">time bu gate dt n v i root rv &nbsp; returns cents offset</p>
     </div>
 
     <div class="section" id="param-index">
-      <h3>Params <span style="color:var(--dim);font-weight:normal;font-size:10px;margin-left:4px" id="param-inst-name"></span></h3>
+      <h3>Params <span style="color:var(--dim);font-weight:normal;font-size:10px;margin-left:4px" id="param-inst-name"></span>
+        <div class="pill" id="param-target-pill">
+          <button class="pill-opt on" id="pill-param-seq" onclick="setParamTarget('seq')">seq</button>
+          <button class="pill-opt" id="pill-param-elem" onclick="setParamTarget('elem')">element</button>
+        </div>
+      </h3>
       <div id="param-list" style="font-size:11px;color:var(--dim);columns:2;column-gap:12px;line-height:1.8"></div>
     </div>
 
@@ -217,7 +236,7 @@ button.send { background: var(--good); color: #000; }
   <div id="col-right">
 
     <div class="section" id="dsl-section">
-      <h3>DSL <input type="text" id="seed-input" class="inline-input" style="width:80px;margin-left:auto" value="" placeholder="seed expr" title="Seed expression: v, n, root, rand(), etc."></h3>
+      <h3>DSL <span id="seed-resolved" style="color:var(--dim);font-weight:normal;font-size:10px;margin-left:4px"></span> <input type="text" id="seed-input" class="inline-input" style="width:80px;margin-left:auto" value="" placeholder="seed expr" title="Seed expression: v, n, root, rand(), etc."></h3>
       <textarea id="dsl-output" readonly></textarea>
     </div>
 
@@ -225,6 +244,7 @@ button.send { background: var(--good); color: #000; }
       <h3>
         Preview
         <button class="play-btn" id="play-btn" onclick="playPreview()" title="Send + Trigger">&#9654;</button>
+        <button class="play-btn" id="stop-btn" onclick="stopPreview()" title="Stop" style="background:var(--accent)">&#9632;</button>
         <input type="text" id="root-note" value="C4" class="inline-input" style="width:36px" title="Root note">
         <input type="text" id="root-vel" value="100" class="inline-input" style="width:30px" title="Velocity">
         <span class="status" id="status"></span>
@@ -254,13 +274,12 @@ function parseNoteName(s) {
   return (parseInt(m[3]) + 1) * 12 + base + acc;
 }
 
-/* Known params per instrument type */
-const INST_PARAMS = {
-  'fm-synth': ['carrier_ratio','mod_ratio','mod_index','attack','decay','sustain','release','feedback'],
-  'sub-synth': ['waveform','pulse_width','filter_cutoff','filter_reso','filter_env_depth','filt_attack','filt_decay','filt_sustain','filt_release','amp_attack','amp_decay','amp_sustain','amp_release'],
-  'ym2413': ['instrument','volume','rhythm','vibrato','portamento','pitchbend'],
-  'fm-drums': ['carrier_freq','mod_freq','mod_index','pitch_sweep','pitch_decay','decay','noise_amt','click_amt','feedback'],
-};
+/* Instrument schemas — populated from keyseq_spec, cached (static) */
+let instSchemas = {};   /* { 'fm-synth': { params: [{name,min,max,default,type,scale?,labels?}] } } */
+let specVars = [];      /* expression variables */
+let specFuncs = [];     /* expression functions */
+let specConsts = [];    /* constants */
+let specOps = [];       /* operators */
 
 const LS_PRESETS = 'miniwave_keyseq_presets';
 const LS_ACTIVE = 'miniwave_keyseq_active';
@@ -276,13 +295,13 @@ let midiDevices = [];
 /* ── Default presets ── */
 const FACTORY = [
   { key:'user',    label:'My Sequence', t:'0.125', g:'', gated:true, loop:false, algo:true, offsets:'0,12,7,12', levels:'1,0.7,0.5,0.3', n:'n+1', v:'v-0.03', et:'', eg:'', end:'v<=0', frame:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'shimmer', label:'Shimmer',     t:'0.125', g:'0.6', gated:false, loop:true, algo:false, offsets:'0,12,7,12', levels:'1,0.7,0.5,0.3', n:'', v:'', et:'', eg:'', en:{n:false,v:false,t:false,g:false} },
+  { key:'shimmer', label:'Shimmer',     t:'0.125', g:'0.9', gated:false, loop:true, algo:false, offsets:'0,12,7,12', levels:'1,0.7,0.5,0.3', n:'', v:'', et:'', eg:'', en:{n:false,v:false,t:false,g:false} },
   { key:'climb',   label:'Climb',       t:'0.125', g:'', gated:true, loop:false, algo:true, n:'n+1', v:'v-0.03', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
   { key:'siren',   label:'Siren',       t:'0.5', g:'', gated:true, loop:false, algo:true, n:'root+i%2*10-5', v:'v', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'gun',     label:'Rapid Fire',  t:'0.2', g:'0.1', gated:true, loop:false, algo:true, n:'n', v:'v-0.005', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
+  { key:'gun',     label:'Rapid Fire',  t:'0.2', g:'0.5', gated:true, loop:false, algo:true, n:'n', v:'v-0.005', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
   { key:'fifths',  label:'Circle of 5ths', t:'0.125', g:'', gated:true, loop:false, algo:true, n:'root+i*7%12', v:'v-0.01', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
   { key:'bounce',  label:'Bounce',      t:'0.125', g:'', gated:true, loop:false, algo:true, n:'root+abs(i%8-4)*3', v:'v-0.02', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'scatter', label:'Scatter',     t:'0.1', g:'0.08', gated:true, loop:false, algo:true, n:'root+i*13%24-12', v:'v-0.015', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
+  { key:'scatter', label:'Scatter',     t:'0.1', g:'0.8', gated:true, loop:false, algo:true, n:'root+i*13%24-12', v:'v-0.015', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
 ];
 
 function loadState() {
@@ -359,6 +378,7 @@ function setCh(ch) {
   activeCh = ch;
   saveCh();
   updateChLabel();
+  fetchSpec();
 }
 
 function updateChLabel() {
@@ -395,6 +415,7 @@ function captureState() {
     end: document.getElementById('expr-end').value,
     seed: document.getElementById('seed-input').value,
     en: { ...exprEnabled },
+    params: JSON.parse(JSON.stringify(activeParams)),
   };
 }
 
@@ -424,7 +445,7 @@ function selectPreset(idx) {
   buildPresetBar();
 }
 
-function applyPreset(p) {
+function applyPreset(p, skipDSL) {
   document.getElementById('preset-name').value = p.label || '';
   document.getElementById('step-t').value = p.t || '0.125';
   document.getElementById('gate-t').value = p.g || '';
@@ -443,7 +464,17 @@ function applyPreset(p) {
   syncModeButtons();
   if (p.en) { Object.assign(exprEnabled, p.en); }
   syncExprToggles();
-  simulate();
+  /* Restore param expressions */
+  activeParams.seq = p.params && p.params.seq ? { ...p.params.seq } : {};
+  activeParams.elem = p.params && p.params.elem ? { ...p.params.elem } : {};
+  renderParamRows();
+  if (skipDSL) {
+    /* Just build the DSL display and fetch server state — don't push */
+    document.getElementById('dsl-output').value = buildDSL();
+    schedulePreview();
+  } else {
+    simulate();
+  }
 }
 
 /* Rename */
@@ -513,8 +544,18 @@ function buildDSL() {
     if (levels) parts.push('v' + levels);
   }
 
+  /* Seq param expressions (per-step) */
+  for (const [name, val] of Object.entries(activeParams.seq)) {
+    if (val.trim()) parts.push(name + ':' + val.trim());
+  }
+
   const frame = document.getElementById('expr-frame').value.trim();
   if (frame) parts.push('frame:' + frame);
+
+  /* Element param expressions (per-frame) */
+  for (const [name, val] of Object.entries(activeParams.elem)) {
+    if (val.trim()) parts.push(name + ':' + val.trim());
+  }
 
   const end = document.getElementById('expr-end').value.trim();
   if (end) parts.push('end:' + end);
@@ -549,95 +590,85 @@ function evalExpr(src, ctx) {
   } catch(e) { return null; }
 }
 
-/* ── Simulate ── */
-const MAX_SIM = 512; /* hard safety cap */
+/* ── Preview (server-authoritative) ── */
+let _pvTimer = null;
+let _dslSeq = 0; /* ensures preview waits for latest DSL push */
+
+function schedulePreview() {
+  clearTimeout(_pvTimer);
+  _pvTimer = setTimeout(fetchPreview, 150);
+}
 
 function simulate() {
   const dsl = buildDSL();
   document.getElementById('dsl-output').value = dsl;
+  const seq = ++_dslSeq;
+  sendDSL().then(() => { if (seq === _dslSeq) schedulePreview(); });
+}
 
-  const root = parseNoteName(document.getElementById('root-note').value);
-  const vel = (parseInt(document.getElementById('root-vel').value) || 100) / 127;
-  const maxSteps = MAX_SIM;
-  const stepT = parseFloat(document.getElementById('step-t').value) || 0.125;
-  const gateT = parseFloat(document.getElementById('gate-t').value) || stepT * 0.8;
-  const algo = document.getElementById('cb-algo').checked;
-  const endExpr = document.getElementById('expr-end').value.trim();
-
-  let html = '';
-  let totalBeats = 0;
-  let totalSteps = 0;
-
-  if (algo) {
-    const exN = exprEnabled.n ? document.getElementById('expr-n').value.trim() : '';
-    const exV = exprEnabled.v ? document.getElementById('expr-v').value.trim() : '';
-    const exT = exprEnabled.t ? document.getElementById('expr-t').value.trim() : '';
-    const exG = exprEnabled.g ? document.getElementById('expr-g').value.trim() : '';
-    const exFrame = document.getElementById('expr-frame').value.trim();
-
-    /* Evaluate seed expression for deterministic preview */
-    const seedExpr = document.getElementById('seed-input').value.trim();
-    let seedVal;
-    if (seedExpr) {
-      const rawVel = parseInt(document.getElementById('root-vel').value) || 100;
-      const seedCtx = { n: root, v: rawVel, rv: vel, root, i: 0, time: 0, gate: 0 };
-      const sv = evalExpr(seedExpr, seedCtx);
-      seedVal = sv !== null ? (Math.abs(sv) * 2654435761 >>> 0) || 1 : (root * 7919 + 1);
-    } else {
-      seedVal = root * 7919 + 1;
+async function fetchPreview() {
+  try {
+    const r = await postAPI({
+      type: 'keyseq_preview',
+      channel: activeCh,
+      note: parseNoteName(document.getElementById('root-note').value),
+      velocity: parseInt(document.getElementById('root-vel').value) || 100
+    });
+    const data = await r.json();
+    if (data.error) {
+      document.getElementById('preview').innerHTML =
+        `<div style="color:var(--dim)">${data.error}</div>`;
+      return;
     }
-    _rs = (seedVal | 1) >>> 0;
-    _noiseSeed = seedVal * 0.01;
-
-    const bpm = parseInt(document.getElementById('bpm-input').value) || 120;
-    let ctx = { n: root, v: vel, t: stepT, g: gateT, i: 0, root, rv: vel, time: 0, bu: 0, gate: 0 };
-
-    /* Step 0 = root note (unmodified) */
-    html += line(0, root, 0, vel, ctx.t, ctx.g, totalBeats, exFrame ? evalFrameAt(exFrame, ctx, 0) : null);
-    totalBeats += ctx.t; totalSteps = 1;
-
-    for (let i = 1; i < MAX_SIM; i++) {
-      ctx.i = i;
-      ctx.time = totalBeats * 60 / bpm;
-
-      let newN = exN ? evalExpr(exN, ctx) : ctx.n;
-      let newV = exV ? evalExpr(exV, ctx) : ctx.v;
-      let newT = exT ? evalExpr(exT, ctx) : ctx.t;
-      let newG = exG ? evalExpr(exG, ctx) : ctx.g;
-      if (newN === null || newV === null) { html += '<div style="color:var(--accent)">expr error</div>'; break; }
-      ctx.n = newN; ctx.v = newV;
-      if (newT !== null) ctx.t = Math.max(newT, 0.001);
-      if (newG !== null) ctx.g = Math.max(newG, 0.001);
-
-      let nCents = (ctx.n - Math.round(ctx.n)) * 100;
-      html += line(i, ctx.n, nCents, ctx.v, ctx.t, ctx.g, totalBeats, exFrame ? evalFrameAt(exFrame, ctx, totalBeats) : null);
-      totalBeats += ctx.t; totalSteps++;
-
-      /* End condition — evaluated after step is rendered */
-      if (endExpr) {
-        const endVal = evalExpr(endExpr, ctx);
-        if (endVal && endVal !== 0) {
-          html += `<div style="color:var(--dim);padding:2px 0">end: ${endExpr} @ step ${i}</div>`;
-          break;
-        }
-      }
-    }
-  } else {
-    const offsets = document.getElementById('offsets').value.split(',').map(Number);
-    const levels = document.getElementById('levels').value.split(',').map(Number);
-    const loop = document.getElementById('cb-loop').checked;
-    const count = loop ? Math.min(maxSteps, offsets.length * 4) : offsets.length;
-    for (let i = 0; i < count; i++) {
-      const idx = i % offsets.length;
-      const note = Math.max(0, Math.min(127, root + (offsets[idx] || 0)));
-      const lev = levels[idx] !== undefined ? levels[idx] : 1;
-      html += line(i, note, 0, vel * lev, stepT, gateT, totalBeats, null);
-      totalBeats += stepT; totalSteps++;
-    }
+    renderPreview(data);
+  } catch(e) {
+    document.getElementById('preview').innerHTML =
+      `<div style="color:var(--accent)">preview: ${e.message}</div>`;
   }
-  document.getElementById('preview-stats').textContent = `${totalBeats.toFixed(2)}B \u00b7 ${totalSteps}S`;
-  document.getElementById('preview').innerHTML = html;
+}
 
+function renderPreview(data) {
+  if (!data || !data.steps) return;
+  const exFrame = document.getElementById('expr-frame').value.trim();
+  const root = parseNoteName(document.getElementById('root-note').value);
+  const rv = (parseInt(document.getElementById('root-vel').value) || 100) / 127;
+
+  /* Sync seed so frame eval uses the same noise as the C engine */
+  if (data.seed != null) {
+    _rs = (data.seed | 1) >>> 0;
+    _noiseSeed = data.seed * 0.01;
+  }
+
+  /* Sync server state into UI */
+  if (data.bpm) document.getElementById('bpm-input').value = Math.round(data.bpm);
+  /* Only sync server DSL if local textarea is empty (initial load) */
+  if (data.dsl && !document.getElementById('dsl-output').value.trim()) {
+    document.getElementById('dsl-output').value = data.dsl;
+  }
+  document.getElementById('seed-resolved').textContent = data.seed != null ? `seed=${data.seed}` : '';
+
+  const flags = [data.algo ? 'algo' : 'offsets', data.gated ? 'gated' : '', data.loop ? 'loop' : ''].filter(Boolean).join(' ');
+  document.getElementById('preview-stats').textContent = `${data.total_beats.toFixed(2)}B ${data.total_steps}S ${flags}`;
+  let html = `<div class="pv-header"><span class="pv-col-i">#</span><span class="pv-col-n">note</span><span class="pv-col-v">vel</span><span class="pv-col-t">t</span><span class="pv-col-g">g</span><span class="pv-col-b">beat</span><span class="pv-col-x"></span></div>`;
+  for (const s of data.steps) {
+    let frameCents = null;
+    if (exFrame) {
+      frameCents = evalFrameAt(exFrame, {
+        n: s.n, v: s.v, t: s.t, g: s.g, i: s.i, root, rv
+      }, s.beat);
+    }
+    html += line(s.i, s.n, s.cents, s.v, s.t, s.g, s.beat, frameCents);
+  }
+
+  /* Footer */
+  let footer = [];
+  if (data.end_step >= 0) footer.push(`end: ${data.end_reason} @ step ${data.end_step}`);
+  if (data.seed != null) footer.push(`seed: ${data.seed}`);
+  if (footer.length) {
+    html += `<div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px;color:var(--dim);font-size:9px">${footer.join(' &nbsp; ')}</div>`;
+  }
+
+  document.getElementById('preview').innerHTML = html;
   updateParamIndex();
 }
 
@@ -656,89 +687,213 @@ function line(i, rawN, nCents, vel, t, g, beat, frameCents) {
   let midi = Math.round(rawN);
   if (midi < 0) midi = 0; if (midi > 127) midi = 127;
   const name = noteName(midi);
-
-  /* Build cents string from fractional n */
   let cStr = '';
-  if (Math.abs(nCents) >= 0.5) {
-    cStr = `<span style="color:var(--dim)">${nCents >= 0 ? '+' : ''}${nCents.toFixed(0)}c</span>`;
-  }
-
-  /* Frame cents */
+  if (Math.abs(nCents) >= 0.5) cStr = `<span style="color:var(--dim)">${nCents >= 0 ? '+' : ''}${nCents.toFixed(0)}c</span>`;
   let fStr = '';
-  if (frameCents !== null && frameCents !== undefined) {
-    fStr = ` <span style="color:#8866cc">${frameCents >= 0 ? '+' : ''}${frameCents.toFixed(1)}c</span>`;
-  }
+  if (frameCents !== null && frameCents !== undefined) fStr = `<span style="color:#8866cc">${frameCents >= 0 ? '+' : ''}${frameCents.toFixed(1)}c</span>`;
 
-  return `<div class="note-line"><span class="step">${i}</span><span class="note">${name}${cStr}</span><span class="vel">${vel.toFixed(3)}</span>${fStr} <span class="time">t=${t.toFixed(3)} @${beat.toFixed(2)}</span></div>`;
+  return `<div class="note-line"><span class="pv-col-i">${i}</span><span class="pv-col-n">${name}${cStr}</span><span class="pv-col-v">${vel.toFixed(3)}</span><span class="pv-col-t">${t.toFixed(3)}</span><span class="pv-col-g">${g.toFixed(3)}</span><span class="pv-col-b">${beat.toFixed(2)}</span><span class="pv-col-x">${fStr}</span></div>`;
+}
+
+/* ── Spec (instrument schemas + expression language) ── */
+async function fetchSpec() {
+  try {
+    const r = await postAPI({type:'keyseq_spec', channel:activeCh});
+    const spec = await r.json();
+
+    /* Cache static instrument schemas (only on first call) */
+    if (spec.instruments && !Object.keys(instSchemas).length) {
+      instSchemas = spec.instruments;
+    }
+
+    /* Cache expression language info */
+    if (spec.variables) specVars = spec.variables;
+    if (spec.functions) specFuncs = spec.functions;
+    if (spec.constants) specConsts = spec.constants;
+    if (spec.operators) specOps = spec.operators;
+
+    /* Update expression hint lines from spec */
+    const nameOf = x => typeof x === 'object' && x !== null ? (x.signature || x.name || '') : String(x);
+    const varStr = specVars.map(nameOf).join(' ');
+    const opStr = specOps.map(nameOf).join(' ');
+    const fnStr = specFuncs.map(nameOf).join(' ');
+    const constStr = specConsts.map(nameOf).join(' ');
+    const hintSeq = document.querySelector('#algo-section > p');
+    if (hintSeq) hintSeq.textContent = `${varStr}  ${opStr}  ${fnStr} ${constStr}`;
+    const hintElem = document.querySelector('#frame-section > p');
+    if (hintElem) hintElem.textContent = `${varStr}  ${fnStr} ${constStr}  returns cents offset`;
+
+    /* Update channel instrument + current values */
+    updateParamIndex(spec.active_instrument, spec.current_values);
+  } catch(e) {
+    /* Spec endpoint not available — fall back to updateParamIndex from rack data */
+    updateParamIndex();
+  }
 }
 
 /* ── API ── */
-async function playPreview() {
+async function postAPI(payload) {
+  const r = await fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload) });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r;
+}
+
+function sendDSL() {
   const dsl = document.getElementById('dsl-output').value.trim();
+  return postAPI({type:'keyseq_dsl', channel:activeCh, dsl}).catch(() => {});
+}
+
+let _playingNote = -1;
+let _noteOffTimer = null;
+
+async function playPreview() {
+  await stopPreview();
   const note = parseNoteName(document.getElementById('root-note').value);
   const vel = parseInt(document.getElementById('root-vel').value) || 100;
+  const status = document.getElementById('status');
   try {
-    /* Send DSL */
-    await fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({type:'keyseq_dsl', channel:activeCh, dsl}) });
-    /* Trigger note */
-    await fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({type:'note_on', channel:activeCh, note, velocity:vel}) });
-    document.getElementById('status').textContent = `${noteName(note)} ch${activeCh+1}`;
-    /* Auto release after 4s */
-    setTimeout(async () => {
-      await fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({type:'note_off', channel:activeCh, note}) });
-      document.getElementById('status').textContent = '';
-    }, 4000);
-  } catch(e) { document.getElementById('status').textContent = e.message; }
+    await sendDSL();
+    await postAPI({type:'note_on', channel:activeCh, note, velocity:vel});
+    _playingNote = note;
+    status.textContent = `${noteName(note)} ch${activeCh+1}`;
+    _noteOffTimer = setTimeout(() => stopPreview(), 4000);
+  } catch(e) { status.textContent = e.message; }
+}
+
+async function stopPreview() {
+  clearTimeout(_noteOffTimer);
+  _noteOffTimer = null;
+  if (_playingNote >= 0) {
+    const note = _playingNote;
+    _playingNote = -1;
+    try { await postAPI({type:'note_off', channel:activeCh, note}); } catch(e) {}
+  }
+  document.getElementById('status').textContent = '';
 }
 
 /* ── Param index ── */
-function updateParamIndex() {
-  const s = rackSlots[activeCh];
-  const instName = s && s.active ? s.type : '';
-  document.getElementById('param-inst-name').textContent = instName;
-  const list = document.getElementById('param-list');
-  const params = INST_PARAMS[instName] || [];
-  if (!params.length) { list.innerHTML = '<span style="color:var(--dim)">no instrument</span>'; return; }
-  list.innerHTML = params.map(p =>
-    `<span title="Click to add ${p}:expr" onclick="insertParam('${p}')">${p}</span>`
-  ).join('<br>');
+let paramTarget = 'seq'; /* 'seq' or 'elem' */
+const activeParams = { seq: {}, elem: {} }; /* { paramName: exprValue } */
+
+function setParamTarget(target) {
+  paramTarget = target;
+  document.getElementById('pill-param-seq').classList.toggle('on', target === 'seq');
+  document.getElementById('pill-param-elem').classList.toggle('on', target === 'elem');
 }
 
-function insertParam(name) {
-  /* Insert into last focused expression field, or append to DSL as fallback */
-  if (lastExprField) {
-    const pos = lastExprField.selectionStart || lastExprField.value.length;
-    const val = lastExprField.value;
-    lastExprField.value = val.slice(0, pos) + name + val.slice(pos);
-    lastExprField.focus();
-    lastExprField.setSelectionRange(pos + name.length, pos + name.length);
-    autoSave(); simulate();
-  } else {
-    const ta = document.getElementById('dsl-output');
-    const cur = ta.value.trim();
-    ta.value = cur + (cur.endsWith(';') || !cur ? ' ' : '; ') + name + ':';
-    ta.focus();
-    ta.setSelectionRange(ta.value.length, ta.value.length);
+function updateParamIndex(specInst, currentValues) {
+  /* Determine instrument name — prefer spec, fall back to rack SSE */
+  const instName = specInst || ((rackSlots[activeCh] && rackSlots[activeCh].active) ? rackSlots[activeCh].type : '');
+  document.getElementById('param-inst-name').textContent = instName;
+  const list = document.getElementById('param-list');
+  const schema = instSchemas[instName];
+  const params = schema ? schema.params : [];
+  if (!params.length) { list.innerHTML = '<span style="color:var(--dim)">no instrument</span>'; return; }
+
+  /* Build current value lookup */
+  const curVals = {};
+  if (currentValues) currentValues.forEach(cv => { curVals[cv.name] = cv.value; });
+
+  list.innerHTML = params.map(p => {
+    const inSeq = p.name in activeParams.seq;
+    const inElem = p.name in activeParams.elem;
+    const active = inSeq || inElem;
+    const style = active ? 'color:var(--good)' : '';
+    const cur = curVals[p.name];
+    const valStr = cur != null ? `=${fmtParamVal(p, cur)}` : '';
+    const range = p.labels ? p.labels.join('|') : `${p.min}–${p.max}`;
+    return `<span style="${style}" title="${p.name} [${range}] default=${p.default}${valStr}" onclick="addParam('${p.name}')">${p.name}${valStr}</span>`;
+  }).join('<br>');
+}
+
+function fmtParamVal(schema, val) {
+  if (schema.labels && schema.type === 'int') {
+    const idx = Math.round(val);
+    return schema.labels[idx] || String(idx);
   }
+  if (schema.type === 'int') return String(Math.round(val));
+  return Number(val).toFixed(val >= 100 ? 0 : val >= 1 ? 2 : 3);
+}
+
+function addParam(name) {
+  if (name in activeParams[paramTarget]) return;
+  activeParams[paramTarget][name] = '';
+  renderParamRows();
+  autoSave(); simulate();
+}
+
+function removeParam(target, name) {
+  delete activeParams[target][name];
+  renderParamRows();
+  autoSave(); simulate();
+}
+
+function getParamSchema(name) {
+  const instName = (rackSlots[activeCh] && rackSlots[activeCh].active) ? rackSlots[activeCh].type : '';
+  const schema = instSchemas[instName];
+  if (!schema) return null;
+  return schema.params.find(p => p.name === name) || null;
+}
+
+function renderParamRows() {
+  for (const target of ['seq', 'elem']) {
+    const container = document.getElementById(target === 'seq' ? 'seq-params' : 'elem-params');
+    container.innerHTML = '';
+    for (const [name, val] of Object.entries(activeParams[target])) {
+      const ps = getParamSchema(name);
+      const hint = ps ? `${ps.min}–${ps.max} default=${ps.default}` : `${name} expr`;
+      const row = document.createElement('div');
+      row.className = 'expr-row';
+      row.innerHTML = `<span class="elabel" style="color:var(--good);font-size:9px;width:auto;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name} ${hint}">${name}</span>`
+        + `<input type="text" value="${val}" placeholder="${hint}" data-param="${name}" data-target="${target}">`
+        + `<button class="rm-btn" onclick="removeParam('${target}','${name}')">&times;</button>`;
+      const input = row.querySelector('input');
+      input.addEventListener('input', () => {
+        activeParams[target][name] = input.value;
+        autoSave(); simulate();
+      });
+      input.addEventListener('focus', () => { lastExprField = input; });
+      container.appendChild(row);
+    }
+  }
+  updateParamIndex();
 }
 
 /* ── MIDI select ── */
 document.getElementById('midi-select').addEventListener('change', (e) => {
-  fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({type:'midi_device', value:e.target.value}) });
+  const prev = e.target._prev || '';
+  postAPI({type:'midi_device', value:e.target.value}).then(() => {
+    e.target._prev = e.target.value;
+  }).catch(() => {
+    /* Revert to previous on failure — next rack_status will reconcile */
+    e.target.value = prev;
+  });
 });
 
 /* ── SSE ── */
-const es = new EventSource('/events');
-es.addEventListener('rack_status', (e) => {
-  try {
-    const d = JSON.parse(e.data);
+function safeParse(raw) {
+  try { return JSON.parse(raw); }
+  catch(e) {
+    /* Backend may emit unescaped strings — try sanitizing control chars + bare quotes */
+    try {
+      const fixed = raw.replace(/[\x00-\x1f]/g, ' ');
+      return JSON.parse(fixed);
+    } catch(e2) { return null; }
+  }
+}
+
+let es;
+function connectSSE() {
+  es = new EventSource('/events');
+
+  es.addEventListener('rack_status', (e) => {
+    const d = safeParse(e.data);
+    if (!d || !d.slots) return;
     rackSlots = d.slots;
     updateChLabel();
 
-    /* Sync MIDI device */
+    /* Sync MIDI device — authoritative from server */
     const sel = document.getElementById('midi-select');
     const serverDev = d.midi_device || '';
     if (serverDev && sel.value !== serverDev) {
@@ -746,24 +901,35 @@ es.addEventListener('rack_status', (e) => {
         if (serverDev.includes(opt.value) && opt.value) { sel.value = opt.value; break; }
       }
     }
-  } catch(e) {}
-});
-es.addEventListener('midi_devices', (e) => {
-  try {
-    const d = JSON.parse(e.data);
+  });
+
+  es.addEventListener('midi_devices', (e) => {
+    const d = safeParse(e.data);
+    if (!d || !Array.isArray(d.devices)) return;
     midiDevices = d.devices;
     const sel = document.getElementById('midi-select');
     const cur = sel.value;
     sel.innerHTML = '<option value="">No Device</option>';
     for (const dev of midiDevices) {
+      if (!dev || typeof dev.id !== 'string') continue;
       const opt = document.createElement('option');
       opt.value = dev.id;
-      opt.textContent = dev.name;
+      opt.textContent = dev.name || dev.id;
       sel.appendChild(opt);
     }
     if (cur) sel.value = cur;
-  } catch(e) {}
-});
+  });
+
+  es.addEventListener('keyseq_trigger', () => {
+    fetchPreview();
+  });
+
+  es.onerror = () => {
+    es.close();
+    setTimeout(connectSSE, 2000);
+  };
+}
+connectSSE();
 
 /* ── BPM + Tap Tempo ── */
 let tapTimes = [];
@@ -790,6 +956,18 @@ document.getElementById('bpm-input').addEventListener('input', () => {
   tapTimes = [];
 });
 
+/* ── Arrow key double/half for numeric inputs ── */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  const el = e.target;
+  if (!el || el.tagName !== 'INPUT' || el.type !== 'text') return;
+  const num = parseFloat(el.value);
+  if (isNaN(num) || num === 0) return;
+  e.preventDefault();
+  el.value = e.key === 'ArrowUp' ? num * 2 : num / 2;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+});
+
 /* ── Auto-preview ── */
 for (const id of ['step-t','gate-t','expr-n','expr-v','expr-t','expr-g','expr-frame','expr-end','offsets','levels','root-note','root-vel','seed-input']) {
   const el = document.getElementById(id);
@@ -799,8 +977,9 @@ for (const id of ['step-t','gate-t','expr-n','expr-v','expr-t','expr-g','expr-fr
 /* ── Init ── */
 loadState();
 buildPresetBar();
-applyPreset(presets[activeIdx]);
+applyPreset(presets[activeIdx], true);
 updateChLabel();
+fetchSpec();
 </script>
 </body>
 </html>

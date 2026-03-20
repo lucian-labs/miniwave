@@ -1,6 +1,7 @@
 #ifndef INSTRUMENTS_H
 #define INSTRUMENTS_H
 
+#include <stdatomic.h>
 #include <stdint.h>
 
 #define MAX_SLOTS 16
@@ -22,14 +23,18 @@ typedef struct InstrumentType {
     int  (*osc_status)(void *state, uint8_t *buf, int max_len);
 } InstrumentType;
 
-/* A slot in the rack */
+/* A slot in the rack.
+ * `active` and `gen` are atomic — render/MIDI threads read them without locks.
+ * Slot swaps: set active=0, barrier, wait for gen to propagate, swap, set active=1.
+ */
 typedef struct {
-    int              active;        /* 0 = empty slot */
+    _Atomic int      active;        /* 0 = empty slot */
     int              type_idx;      /* index into registered instrument types (-1 = none) */
     void            *state;         /* instrument state (malloc'd) */
     float            volume;        /* 0.0 - 1.0 */
     int              mute;
     int              solo;
+    _Atomic uint32_t gen;           /* generation — readers snapshot, writers bump */
 } RackSlot;
 
 /* The rack */

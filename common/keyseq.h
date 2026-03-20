@@ -26,76 +26,43 @@
 #include <stdio.h>
 #include <math.h>
 
+/* FastNoiseLite — single-header noise library */
+#define FNL_IMPL
+#include "FastNoiseLite.h"
+
 #define KEYSEQ_MAX_STEPS 32
+#define KE_EPSILON 0.00001f
 #define KEYSEQ_EXPR_MAX  64
 
 /* ══════════════════════════════════════════════════════════════════════════
- *  Simplex noise (2D/3D)
+ *  Noise via FastNoiseLite
  * ══════════════════════════════════════════════════════════════════════════ */
 
-static const int ke_perm[512] = {
-    151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,30,
-    69,142,8,99,37,240,21,10,23,190,6,148,247,120,234,75,0,26,197,62,94,
-    252,219,203,117,35,11,32,57,177,33,88,237,149,56,87,174,20,125,136,
-    171,168,68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,
-    122,60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,65,25,
-    63,161,1,216,80,73,209,76,132,187,208,89,18,169,200,196,135,130,116,
-    188,159,86,164,100,109,198,173,186,3,64,52,217,226,250,124,123,5,202,
-    38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,
-    42,223,183,170,213,119,248,152,2,44,154,163,70,221,153,101,155,167,
-    43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,
-    218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,81,51,
-    145,235,249,14,239,107,49,192,214,31,181,199,106,157,184,84,204,176,
-    115,121,50,45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,243,
-    141,128,195,78,66,215,61,156,180,
-    151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,30,
-    69,142,8,99,37,240,21,10,23,190,6,148,247,120,234,75,0,26,197,62,94,
-    252,219,203,117,35,11,32,57,177,33,88,237,149,56,87,174,20,125,136,
-    171,168,68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,
-    122,60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,65,25,
-    63,161,1,216,80,73,209,76,132,187,208,89,18,169,200,196,135,130,116,
-    188,159,86,164,100,109,198,173,186,3,64,52,217,226,250,124,123,5,202,
-    38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,
-    42,223,183,170,213,119,248,152,2,44,154,163,70,221,153,101,155,167,
-    43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,
-    218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,81,51,
-    145,235,249,14,239,107,49,192,214,31,181,199,106,157,184,84,204,176,
-    115,121,50,45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,243,
-    141,128,195,78,66,215,61,156,180
-};
+static fnl_state g_fnl;
+static int g_fnl_init = 0;
 
-static float ke_grad2(int hash, float x, float y) {
-    int h = hash & 7;
-    float u = h < 4 ? x : y, v = h < 4 ? y : x;
-    return ((h & 1) ? -u : u) + ((h & 2) ? -2.0f * v : 2.0f * v);
+static void ke_ensure_fnl(void) {
+    if (!g_fnl_init) {
+        g_fnl = fnlCreateState();
+        g_fnl.noise_type = FNL_NOISE_PERLIN;
+        g_fnl.frequency = 1.0f;
+        g_fnl_init = 1;
+    }
+}
+
+static void ke_fnl_seed(int seed) {
+    ke_ensure_fnl();
+    g_fnl.seed = seed;
 }
 
 static float ke_noise2d(float x, float y) {
-    const float F2 = 0.3660254f, G2 = 0.2113249f;
-    float s = (x + y) * F2;
-    int i = (int)floorf(x + s), j = (int)floorf(y + s);
-    float tt = (float)(i + j) * G2;
-    float x0 = x - ((float)i - tt), y0 = y - ((float)j - tt);
-    int i1 = x0 > y0 ? 1 : 0, j1 = x0 > y0 ? 0 : 1;
-    float x1 = x0 - (float)i1 + G2, y1 = y0 - (float)j1 + G2;
-    float x2 = x0 - 1.0f + 2.0f * G2, y2 = y0 - 1.0f + 2.0f * G2;
-    int ii = i & 255, jj = j & 255;
-    float n0 = 0, n1 = 0, n2 = 0;
-    float t0 = 0.5f - x0*x0 - y0*y0;
-    if (t0 > 0) { t0 *= t0; n0 = t0 * t0 * ke_grad2(ke_perm[ii + ke_perm[jj]], x0, y0); }
-    float t1 = 0.5f - x1*x1 - y1*y1;
-    if (t1 > 0) { t1 *= t1; n1 = t1 * t1 * ke_grad2(ke_perm[ii+i1 + ke_perm[jj+j1]], x1, y1); }
-    float t2 = 0.5f - x2*x2 - y2*y2;
-    if (t2 > 0) { t2 *= t2; n2 = t2 * t2 * ke_grad2(ke_perm[ii+1 + ke_perm[jj+1]], x2, y2); }
-    return 70.0f * (n0 + n1 + n2);
+    ke_ensure_fnl();
+    return fnlGetNoise2D(&g_fnl, x, y);
 }
 
 static float ke_noise3d(float x, float y, float z) {
-    /* Simplified 3D — layer two 2D samples */
-    float n1 = ke_noise2d(x, y);
-    float n2 = ke_noise2d(y + 31.416f, z + 17.329f);
-    float n3 = ke_noise2d(z + 47.853f, x + 11.721f);
-    return (n1 + n2 + n3) * 0.333f;
+    ke_ensure_fnl();
+    return fnlGetNoise3D(&g_fnl, x, y, z);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -117,8 +84,11 @@ enum {
     /* functions (0 args) */
     KE_RAND,
     /* functions (multi-arg, resolved at eval) */
-    KE_NOISE,   /* 1-3 args */
+    KE_NOISE,   /* 1-3 args, 0-1 */
+    KE_NOISEB,  /* 1-3 args, -1 to 1 (bipolar/raw) */
     KE_IF,      /* 3 args: cond, then, else */
+    /* GLSL-style functions */
+    KE_FLOOR, KE_CEIL, KE_MIN, KE_MAX, KE_CLAMP, KE_STEP, KE_SMOOTHSTEP,
     KE_END
 };
 
@@ -132,7 +102,10 @@ typedef struct {
     float gate;  /* normalized position within gate (0-1, 0=start, 1=gate end) */
     float held;  /* 1.0 if root key held, 0.0 if released */
     float dt;    /* seconds per sample (1/sampleRate) */
-    float seed;  /* noise seed offset */
+    float seed;  /* noise seed (int cast for FNL, float for legacy) */
+    /* Per-evaluation RNG state — if non-NULL, used instead of globals */
+    uint32_t *local_rand;
+    fnl_state *local_fnl;
 } KeySeqCtx;
 
 /* ── PRNG for rand() — deterministic from context ── */
@@ -210,10 +183,19 @@ static int ke_tokenize(const char *s, KETok *out, int max) {
             else if (strcmp(word, "sin") == 0)   out[n++].type = KE_SIN;
             else if (strcmp(word, "cos") == 0)   out[n++].type = KE_COS;
             else if (strcmp(word, "rand") == 0)  out[n++].type = KE_RAND;
+            else if (strcmp(word, "noiseb") == 0) out[n++].type = KE_NOISEB;
             else if (strcmp(word, "noise") == 0) out[n++].type = KE_NOISE;
             else if (strcmp(word, "if") == 0)    out[n++].type = KE_IF;
+            else if (strcmp(word, "floor") == 0) out[n++].type = KE_FLOOR;
+            else if (strcmp(word, "ceil") == 0)  out[n++].type = KE_CEIL;
+            else if (strcmp(word, "min") == 0)   out[n++].type = KE_MIN;
+            else if (strcmp(word, "max") == 0)   out[n++].type = KE_MAX;
+            else if (strcmp(word, "clamp") == 0) out[n++].type = KE_CLAMP;
+            else if (strcmp(word, "step") == 0)  out[n++].type = KE_STEP;
+            else if (strcmp(word, "smoothstep") == 0) out[n++].type = KE_SMOOTHSTEP;
             else if (strcmp(word, "pi") == 0)    { out[n].type = KE_NUM; out[n].value = 3.14159265f; n++; }
             else if (strcmp(word, "tau") == 0)   { out[n].type = KE_NUM; out[n].value = 6.28318530f; n++; }
+            else if (strcmp(word, "eps") == 0)   { out[n].type = KE_NUM; out[n].value = KE_EPSILON; n++; }
             /* skip unknown */
         }
         else { s++; }
@@ -230,7 +212,7 @@ static int ke_precedence(uint8_t t) {
     return -1;
 }
 static int ke_is_op(uint8_t t) { return t >= KE_ADD && t <= KE_LTE; }
-static int ke_is_func(uint8_t t) { return t >= KE_ABS && t <= KE_IF; }
+static int ke_is_func(uint8_t t) { return t >= KE_ABS && t <= KE_SMOOTHSTEP; }
 
 static void ke_compile(KeySeqExpr *expr, const char *src) {
     KETok infix[KEYSEQ_EXPR_MAX];
@@ -322,20 +304,67 @@ static float ke_eval(const KeySeqExpr *expr, const KeySeqCtx *ctx) {
         case KE_SIN: if (sp >= 1) stk[sp-1] = sinf(stk[sp-1]); break;
         case KE_COS: if (sp >= 1) stk[sp-1] = cosf(stk[sp-1]); break;
         /* 0-arg */
-        case KE_RAND: stk[sp++] = ke_randf(); break;
+        case KE_RAND: {
+            if (ctx->local_rand) {
+                uint32_t *rs = ctx->local_rand;
+                *rs ^= *rs << 13; *rs ^= *rs >> 17; *rs ^= *rs << 5;
+                stk[sp++] = (float)(*rs & 0x7FFFFFFF) / (float)0x7FFFFFFF;
+            } else {
+                stk[sp++] = ke_randf();
+            }
+            break;
+        }
         /* multi-arg: arg count stored in t->value */
         case KE_NOISE: {
             int argc = (int)t->value;
-            float so = ctx->seed;  /* seed offsets noise domain */
-            if (argc >= 3 && sp >= 3) { sp -= 2; stk[sp-1] = ke_noise3d(stk[sp-1]+so, stk[sp]+so, stk[sp+1]+so); }
-            else if (argc >= 2 && sp >= 2) { sp--; stk[sp-1] = ke_noise2d(stk[sp-1]+so, stk[sp]+so); }
-            else if (sp >= 1) { float x = stk[sp-1]+so; stk[sp-1] = ke_noise2d(x, x * 0.7f + 13.37f); }
+            fnl_state *ns = ctx->local_fnl ? ctx->local_fnl : &g_fnl;
+            ke_ensure_fnl();
+            ns->seed = (int)ctx->seed;
+            float nv;
+            if (argc >= 3 && sp >= 3) { sp -= 2; nv = fnlGetNoise3D(ns, stk[sp-1], stk[sp], stk[sp+1]); }
+            else if (argc >= 2 && sp >= 2) { sp--; nv = fnlGetNoise2D(ns, stk[sp-1], stk[sp]); }
+            else if (sp >= 1) { float x = stk[sp-1]; nv = fnlGetNoise2D(ns, x, x * 0.7f + 13.37f); }
+            else { nv = 0; }
+            stk[sp > 0 ? sp-1 : 0] = (nv + 1.0f) * 0.5f; /* map [-1,1] → [0,1] */
+            break;
+        }
+        case KE_NOISEB: {
+            int argc = (int)t->value;
+            fnl_state *ns = ctx->local_fnl ? ctx->local_fnl : &g_fnl;
+            ke_ensure_fnl();
+            ns->seed = (int)ctx->seed;
+            float nv;
+            if (argc >= 3 && sp >= 3) { sp -= 2; nv = fnlGetNoise3D(ns, stk[sp-1], stk[sp], stk[sp+1]); }
+            else if (argc >= 2 && sp >= 2) { sp--; nv = fnlGetNoise2D(ns, stk[sp-1], stk[sp]); }
+            else if (sp >= 1) { float x = stk[sp-1]; nv = fnlGetNoise2D(ns, x, x * 0.7f + 13.37f); }
+            else { nv = 0; }
+            stk[sp > 0 ? sp-1 : 0] = nv; /* raw [-1,1] */
             break;
         }
         case KE_IF: {
             if (sp >= 3) { sp -= 2; stk[sp-1] = stk[sp-1] != 0.0f ? stk[sp] : stk[sp+1]; }
             break;
         }
+        /* GLSL-style functions */
+        case KE_FLOOR: if (sp >= 1) stk[sp-1] = floorf(stk[sp-1]); break;
+        case KE_CEIL:  if (sp >= 1) stk[sp-1] = ceilf(stk[sp-1]); break;
+        case KE_MIN:   if (sp >= 2) { sp--; stk[sp-1] = stk[sp-1] < stk[sp] ? stk[sp-1] : stk[sp]; } break;
+        case KE_MAX:   if (sp >= 2) { sp--; stk[sp-1] = stk[sp-1] > stk[sp] ? stk[sp-1] : stk[sp]; } break;
+        case KE_CLAMP: /* clamp(x, lo, hi) */
+            if (sp >= 3) { sp -= 2; float x=stk[sp-1],lo=stk[sp],hi=stk[sp+1]; stk[sp-1] = x<lo?lo:x>hi?hi:x; }
+            break;
+        case KE_STEP: /* step(edge, x) → 0 if x < edge, else 1 */
+            if (sp >= 2) { sp--; stk[sp-1] = stk[sp] >= stk[sp-1] ? 1.0f : 0.0f; }
+            break;
+        case KE_SMOOTHSTEP: /* smoothstep(edge0, edge1, x) */
+            if (sp >= 3) {
+                sp -= 2;
+                float e0=stk[sp-1], e1=stk[sp], x=stk[sp+1];
+                float tt = (e1 != e0) ? (x - e0) / (e1 - e0) : 0;
+                if (tt < 0) tt = 0; if (tt > 1) tt = 1;
+                stk[sp-1] = tt * tt * (3.0f - 2.0f * tt);
+            }
+            break;
         default: break;
         }
     }
@@ -415,6 +444,7 @@ typedef struct {
     void   *inst_state;
     void  (*midi_fn)(void *, uint8_t, uint8_t, uint8_t);
     void  (*param_fn)(void *state, const char *param_name, float value);
+    void  (*graph_fn)(const char *json, int len);  /* broadcast step graph on trigger */
     uint8_t midi_channel;
 
     char  source[512];
@@ -422,11 +452,15 @@ typedef struct {
 
 /* ── Init / bind ── */
 
+/* Global graph callback — set once by server before rack init */
+static void (*g_keyseq_graph_fn)(const char *json, int len) = NULL;
+
 static void keyseq_init(KeySeq *ks) {
     memset(ks, 0, sizeof(KeySeq));
     ks->step_beats = 0.125f;
     ks->bpm = 120.0f;
     ks->last_played_note = -1;
+    ks->graph_fn = g_keyseq_graph_fn;
 }
 
 static void keyseq_bind(KeySeq *ks, void *inst_state,
@@ -465,6 +499,13 @@ static void keyseq_fire_params_frame(KeySeq *ks, const KeySeqCtx *ctx) {
 
 static inline void keyseq_fire_on(KeySeq *ks, int note, int vel) {
     if (!ks->midi_fn || note < 0 || note > 127) return;
+    /* Always release previous note before firing new one */
+    if (ks->last_played_note >= 0) {
+        ks->firing = 1;
+        ks->midi_fn(ks->inst_state, (uint8_t)(0x80 | ks->midi_channel),
+                    (uint8_t)ks->last_played_note, 0);
+        ks->firing = 0;
+    }
     ks->firing = 1;
     ks->midi_fn(ks->inst_state, (uint8_t)(0x90 | ks->midi_channel), (uint8_t)note, (uint8_t)vel);
     ks->firing = 0;
@@ -597,7 +638,7 @@ static int keyseq_parse(KeySeq *ks, const char *dsl) {
     if (ks->levels[0] == 0.0f)
         for (int i = 0; i < KEYSEQ_MAX_STEPS; i++) ks->levels[i] = 1.0f;
     if (ks->gate_beats <= 0.0f)
-        ks->gate_beats = ks->step_beats * 0.8f;
+        ks->gate_beats = 1.0f;  /* default: full step duration */
     if (ks->algo_mode && !ks->expr_n.valid && !ks->expr_v.valid)
         ks->algo_mode = 0;
     if (ks->algo_mode) ks->num_steps = 1;
@@ -647,8 +688,10 @@ static int keyseq_note_on(KeySeq *ks, int note, int velocity) {
             .i = 0, .time = 0, .gate = 0, .held = 1.0f
         };
         float sv = ke_eval(&ks->expr_seed, &sc);
-        /* Hash the float into a well-distributed seed */
-        uint32_t raw = (uint32_t)(fabsf(sv) * 2654435761.0f);
+        /* Hash the float into a well-distributed seed.
+         * fmodf keeps it in range before cast to avoid uint32 overflow. */
+        float hf = fmodf(fabsf(sv) * 2654435.761f, 4294967000.0f);
+        uint32_t raw = (uint32_t)hf;
         ks->runtime_seed = raw ? raw : 1;
     } else {
         struct timespec ts;
@@ -678,6 +721,10 @@ static int keyseq_note_on(KeySeq *ks, int note, int velocity) {
         int vel = (int)(ks->root_velocity * ks->levels[0] * 127.0f);
         keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
     }
+
+    /* Broadcast step graph if callback is set */
+    if (ks->graph_fn) ks->graph_fn(ks->source, (int)strlen(ks->source));
+
     return 1;
 }
 
@@ -706,7 +753,8 @@ static void keyseq_tick(KeySeq *ks, float dt) {
     ks->note_time += dt;
 
     float step_sec = (ks->algo_mode ? ks->algo_t : ks->step_beats) * 60.0f / ks->bpm;
-    float gate_sec = (ks->algo_mode ? ks->algo_g : ks->gate_beats) * 60.0f / ks->bpm;
+    float gate_ratio = ks->algo_mode ? ks->algo_g : ks->gate_beats;
+    float gate_sec = step_sec * gate_ratio;
 
     ks->step_elapsed += dt;
     ks->gate_elapsed += dt;
@@ -771,10 +819,12 @@ static void keyseq_tick(KeySeq *ks, float dt) {
                 if (end_val != 0.0f) {
                     fprintf(stderr, "[keyseq]   end @ step %d (n=%.2f v=%.4f)\n",
                             ks->current_step, ks->algo_n, ks->algo_v);
+                    if (ks->last_played_note >= 0) keyseq_fire_off(ks, ks->last_played_note);
                     ks->playing = 0; ks->cents_mod = 0; return;
                 }
-            } else if (ks->algo_v <= 0.0f) {
+            } else if (ks->algo_v <= KE_EPSILON) {
                 /* Default: stop on velocity death */
+                if (ks->last_played_note >= 0) keyseq_fire_off(ks, ks->last_played_note);
                 ks->playing = 0; ks->cents_mod = 0; return;
             }
 

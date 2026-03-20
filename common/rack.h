@@ -184,19 +184,22 @@ static int rack_set_slot(int channel, const char *type_name) {
     int old_type_idx = slot->type_idx;
     int was_active = slot->active;
 
-    /* Deactivate slot so render thread skips it */
-    slot->active = 0;
-    __sync_synchronize(); /* memory barrier — ensure render thread sees active=0 */
-    usleep(2000); /* 2ms — let any in-flight render callback finish */
+    /* Deactivate slot — atomic store ensures render/MIDI see it immediately */
+    atomic_store(&slot->active, 0);
+    atomic_fetch_add(&slot->gen, 1);
 
-    /* Swap in new instrument */
+    /* Wait for any in-flight render callback to finish.
+     * Audio buffer at 48kHz/1024 = ~21ms max. 50ms is safe. */
+    usleep(50000);
+
+    /* Swap in new instrument (slot is inactive, no concurrent readers) */
     slot->state = new_state;
     slot->type_idx = tidx;
     slot->volume = 1.0f;
     slot->mute = 0;
     slot->solo = 0;
-    __sync_synchronize();
-    slot->active = 1;
+    atomic_fetch_add(&slot->gen, 1);
+    atomic_store(&slot->active, 1);
 
     /* Now safe to destroy old state */
     if (was_active && old_state && old_type_idx >= 0) {
@@ -218,9 +221,9 @@ static void rack_clear_slot(int channel) {
     int old_type_idx = slot->type_idx;
     int was_active = slot->active;
 
-    slot->active = 0;
-    __sync_synchronize();
-    usleep(2000);
+    atomic_store(&slot->active, 0);
+    atomic_fetch_add(&slot->gen, 1);
+    usleep(50000);
 
     slot->state = NULL;
     slot->type_idx = -1;
@@ -638,7 +641,9 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
     if (ch < 0 || ch >= MAX_SLOTS) return;
 
     RackSlot *slot = &g_rack.slots[ch];
-    if (!slot->active || !slot->state) return;
+    if (!atomic_load(&slot->active)) return;
+    void *st = slot->state;
+    if (!st) return;
     InstrumentType *itype = g_type_registry[slot->type_idx];
 
     uint8_t type = status & 0xF0;
@@ -647,22 +652,22 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
 
     switch (type) {
     case 0x90:
-        itype->midi(slot->state, status, d1, d2);
+        itype->midi(st, status, d1, d2);
         if (g_midi_broadcast) g_midi_broadcast(ch, d1, d2, d2 > 0 ? 1 : 0);
         break;
     case 0x80:
-        itype->midi(slot->state, status, d1, d2);
+        itype->midi(st, status, d1, d2);
         if (g_midi_broadcast) g_midi_broadcast(ch, d1, 0, 0);
         break;
     case 0xE0:
-        itype->midi(slot->state, status, d1, d2);
+        itype->midi(st, status, d1, d2);
         break;
     case 0xB0:
-        itype->midi(slot->state, status, d1, d2);
+        itype->midi(st, status, d1, d2);
         state_mark_dirty();
         break;
     case 0xC0: case 0xD0:
-        itype->midi(slot->state, status, d1, 0);
+        itype->midi(st, status, d1, 0);
         state_mark_dirty();
         break;
     }
@@ -675,7 +680,7 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
 
     int any_solo = 0;
     for (int i = 0; i < MAX_SLOTS; i++) {
-        if (g_rack.slots[i].active && g_rack.slots[i].solo) {
+        if (atomic_load(&g_rack.slots[i].active) && g_rack.slots[i].solo) {
             any_solo = 1;
             break;
         }
@@ -683,13 +688,15 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
 
     for (int i = 0; i < MAX_SLOTS; i++) {
         RackSlot *slot = &g_rack.slots[i];
-        if (!slot->active || !slot->state) continue;
+        if (!atomic_load(&slot->active)) continue;
+        void *st = slot->state;
+        if (!st) continue;
         if (slot->mute) continue;
         if (any_solo && !slot->solo) continue;
 
         InstrumentType *itype = g_type_registry[slot->type_idx];
         memset(slot_buf, 0, sizeof(float) * (size_t)(frames * CHANNELS));
-        itype->render(slot->state, slot_buf, frames, sample_rate);
+        itype->render(st, slot_buf, frames, sample_rate);
 
         float vol = slot->volume;
         for (int j = 0; j < frames * CHANNELS; j++) {

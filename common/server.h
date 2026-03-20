@@ -15,6 +15,32 @@
 #include <poll.h>
 #include <time.h>
 
+/* ── JSON string escaping ──────────────────────────────────────────── */
+
+static int json_escape(char *dst, int max, const char *src) {
+    int j = 0;
+    for (int i = 0; src[i] && j < max - 2; i++) {
+        char c = src[i];
+        if (c == '"' || c == '\\') {
+            if (j + 2 >= max) break;
+            dst[j++] = '\\';
+            dst[j++] = c;
+        } else if (c == '\n') {
+            if (j + 2 >= max) break;
+            dst[j++] = '\\'; dst[j++] = 'n';
+        } else if (c == '\r') {
+            if (j + 2 >= max) break;
+            dst[j++] = '\\'; dst[j++] = 'r';
+        } else if ((unsigned char)c < 0x20) {
+            continue; /* skip other control chars */
+        } else {
+            dst[j++] = c;
+        }
+    }
+    dst[j] = '\0';
+    return j;
+}
+
 /* ── HTML content (loaded at startup) ──────────────────────────────── */
 
 static char *g_html_content = NULL;
@@ -24,7 +50,10 @@ typedef struct {
     int  fd;
     int  is_sse;
     int  detail_channel;
+    int  client_id;      /* unique per SSE connection */
 } HttpClient;
+
+static int g_next_client_id = 1;
 
 static HttpClient g_http_clients[MAX_HTTP_CLIENTS];
 static pthread_mutex_t g_http_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -91,13 +120,15 @@ static int build_rack_status_json(char *buf, int max) {
         if (g_http_clients[i].fd >= 0 && g_http_clients[i].is_sse) sse_count++;
     pthread_mutex_unlock(&g_http_lock);
 
+    char esc_midi[256];
+    json_escape(esc_midi, sizeof(esc_midi), g_midi_device_name);
     pos += snprintf(buf + pos, (size_t)(max - pos),
         "],\"master_volume\":%.4f,\"midi_device\":\"%s\","
         "\"audio_backend\":\"%s\",\"local_mute\":%d,"
         "\"osc_port\":%d,\"mcast_active\":%d,\"mcast_group\":\"%s:%d\","
         "\"bus_active\":%d,\"bus_slot\":%d,"
         "\"sse_clients\":%d}",
-        (double)g_rack.master_volume, g_midi_device_name,
+        (double)g_rack.master_volume, esc_midi,
         g_use_jack ? "JACK" : platform_audio_fallback_name(),
         g_rack.local_mute,
         DEFAULT_OSC_PORT, g_mcast_active,
@@ -127,9 +158,12 @@ static int build_midi_devices_json(char *buf, int max) {
     int pos = 0;
     pos += snprintf(buf + pos, (size_t)(max - pos), "{\"type\":\"midi_devices\",\"devices\":[");
     for (int i = 0; i < ndevs; i++) {
+        char esc_id[128], esc_name[256];
+        json_escape(esc_id, sizeof(esc_id), devs[i]);
+        json_escape(esc_name, sizeof(esc_name), devnames[i]);
         pos += snprintf(buf + pos, (size_t)(max - pos),
             "%s{\"id\":\"%s\",\"name\":\"%s\"}", i ? "," : "",
-            devs[i], devnames[i]);
+            esc_id, esc_name);
     }
     pos += snprintf(buf + pos, (size_t)(max - pos), "]}");
     return pos;
@@ -475,6 +509,103 @@ static int mcast_init(void) {
     return 0;
 }
 
+/* ── KeySeq expression spec (live, always in sync with binary) ──────── */
+
+static const char *KEYSEQ_SPEC_JSON =
+    "{"
+    "\"variables\":["
+    "{\"name\":\"n\",\"desc\":\"Current MIDI note\",\"min\":0,\"max\":127,\"default\":60,\"type\":\"float\"},"
+    "{\"name\":\"v\",\"desc\":\"Current velocity\",\"min\":0,\"max\":1,\"default\":0.787,\"type\":\"float\"},"
+    "{\"name\":\"t\",\"desc\":\"Step time (beats)\",\"min\":0.001,\"max\":16,\"default\":0.125,\"type\":\"float\"},"
+    "{\"name\":\"g\",\"desc\":\"Gate ratio of step\",\"min\":0,\"max\":4,\"default\":1,\"type\":\"float\"},"
+    "{\"name\":\"i\",\"desc\":\"Step index\",\"min\":0,\"max\":512,\"default\":0,\"type\":\"int\"},"
+    "{\"name\":\"root\",\"desc\":\"Trigger note\",\"min\":0,\"max\":127,\"default\":60,\"type\":\"int\"},"
+    "{\"name\":\"rv\",\"desc\":\"Trigger velocity\",\"min\":0,\"max\":1,\"default\":0.787,\"type\":\"float\"},"
+    "{\"name\":\"time\",\"desc\":\"Seconds elapsed\",\"min\":0,\"max\":300,\"default\":0,\"type\":\"float\"},"
+    "{\"name\":\"bu\",\"desc\":\"Beat position in step\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
+    "{\"name\":\"gate\",\"desc\":\"Position in gate\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
+    "{\"name\":\"held\",\"desc\":\"Key held\",\"min\":0,\"max\":1,\"default\":1,\"type\":\"bool\"},"
+    "{\"name\":\"dt\",\"desc\":\"Sample period\",\"min\":0,\"max\":0.001,\"default\":0.0000208,\"type\":\"float\"}"
+    "],"
+    "\"constants\":[\"pi\",\"tau\"],"
+    "\"operators\":[\"+\",\"-\",\"*\",\"/\",\"%\",\">\",\"<\",\">=\",\"<=\"],"
+    "\"functions\":["
+    "{\"name\":\"noise\",\"args\":\"1-3\",\"range\":\"0-1\",\"desc\":\"Perlin noise\"},"
+    "{\"name\":\"noiseb\",\"args\":\"1-3\",\"range\":\"-1 to 1\",\"desc\":\"Perlin noise bipolar\"},"
+    "{\"name\":\"sin\",\"args\":1,\"range\":\"-1 to 1\"},"
+    "{\"name\":\"cos\",\"args\":1,\"range\":\"-1 to 1\"},"
+    "{\"name\":\"abs\",\"args\":1,\"range\":\"0+\"},"
+    "{\"name\":\"rand\",\"args\":0,\"range\":\"0-1\",\"desc\":\"Deterministic PRNG\"},"
+    "{\"name\":\"if\",\"args\":3,\"desc\":\"if(cond,then,else)\"},"
+    "{\"name\":\"floor\",\"args\":1},{\"name\":\"ceil\",\"args\":1},"
+    "{\"name\":\"min\",\"args\":2},{\"name\":\"max\",\"args\":2},"
+    "{\"name\":\"clamp\",\"args\":3,\"desc\":\"clamp(x,lo,hi)\"},"
+    "{\"name\":\"step\",\"args\":2,\"desc\":\"step(edge,x)\"},"
+    "{\"name\":\"smoothstep\",\"args\":3,\"desc\":\"smoothstep(e0,e1,x)\"}"
+    "],"
+    "\"dsl_tokens\":["
+    "{\"token\":\"t<beats>\",\"desc\":\"Step time (default 0.125)\"},"
+    "{\"token\":\"g<ratio>\",\"desc\":\"Gate ratio (default 1.0)\"},"
+    "{\"token\":\"gated\",\"desc\":\"Stop on key release\"},"
+    "{\"token\":\"loop\",\"desc\":\"Loop offsets\"},"
+    "{\"token\":\"algo\",\"desc\":\"Algorithm mode\"},"
+    "{\"token\":\"n:<expr>\",\"desc\":\"Note expression\"},"
+    "{\"token\":\"v:<expr>\",\"desc\":\"Velocity expression\"},"
+    "{\"token\":\"t:<expr>\",\"desc\":\"Step time expression\"},"
+    "{\"token\":\"g:<expr>\",\"desc\":\"Gate expression\"},"
+    "{\"token\":\"end:<expr>\",\"desc\":\"End condition\"},"
+    "{\"token\":\"seed:<expr>\",\"desc\":\"Seed expression\"},"
+    "{\"token\":\"frame:<expr>\",\"desc\":\"Per-sample cents mod\"},"
+    "{\"token\":\"<name>:<expr>\",\"desc\":\"Param bus\"}"
+    "],"
+    "\"api\":["
+    "{\"type\":\"keyseq_dsl\",\"fields\":[\"channel\",\"dsl\"],\"desc\":\"Load keyseq\"},"
+    "{\"type\":\"keyseq_preview\",\"fields\":[\"channel\",\"note\",\"velocity\"],\"desc\":\"Preview from channel state\"},"
+    "{\"type\":\"keyseq_stop\",\"fields\":[\"channel\"],\"desc\":\"Stop keyseq\"},"
+    "{\"type\":\"note_on\",\"fields\":[\"channel\",\"note\",\"velocity\"],\"desc\":\"Trigger note\"},"
+    "{\"type\":\"note_off\",\"fields\":[\"channel\",\"note\"],\"desc\":\"Release note\"}"
+    "],"
+    "\"sse_events\":[\"hello\",\"rack_status\",\"rack_types\",\"midi_devices\",\"ch_status\",\"keyseq_trigger\"]"
+    "}";
+
+/* ── KeySeq graph broadcast (SSE + OSC multicast) ──────────────────── */
+
+static void keyseq_graph_broadcast(const char *dsl_source, int len) {
+    (void)len;
+    /* Build a compact preview and broadcast as SSE event.
+     * We can't do the full simulation here (called from MIDI thread),
+     * so just broadcast the DSL source — the frontend uses the
+     * /api/keyseq_preview endpoint for the full computed graph. */
+    char json[1024];
+    char esc_dsl[512];
+    json_escape(esc_dsl, sizeof(esc_dsl), dsl_source);
+    int jlen = snprintf(json, sizeof(json),
+        "{\"type\":\"keyseq_trigger\",\"dsl\":\"%s\"}", esc_dsl);
+    if (jlen > 0) {
+        sse_broadcast("keyseq_trigger", json);
+        /* Also push over OSC multicast as /keyseq/trigger with string arg */
+        if (g_mcast.active) {
+            mcast_push("/keyseq/trigger", "s", NULL, NULL, dsl_source);
+        }
+    }
+}
+
+/* Wire graph broadcast into all slot keyseqs — call after rack_init + state_load */
+static void keyseq_wire_graph_broadcast(void) {
+    g_keyseq_graph_fn = keyseq_graph_broadcast;
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        RackSlot *slot = &g_rack.slots[i];
+        if (!slot->active || !slot->state) continue;
+        const char *tname = g_type_registry[slot->type_idx]->name;
+        KeySeq *ks = NULL;
+        if (strcmp(tname, "fm-synth") == 0) ks = &((FMSynth *)slot->state)->keyseq;
+        else if (strcmp(tname, "sub-synth") == 0) ks = &((SubSynth *)slot->state)->keyseq;
+        else if (strcmp(tname, "ym2413") == 0) ks = &((YM2413State *)slot->state)->keyseq;
+        else if (strcmp(tname, "fm-drums") == 0) ks = &((FMDrumState *)slot->state)->keyseq;
+        if (ks) ks->graph_fn = keyseq_graph_broadcast;
+    }
+}
+
 /* ── POST /api handler ─────────────────────────────────────────────── */
 
 static void http_handle_api(int fd, const char *body) {
@@ -489,9 +620,14 @@ static void http_handle_api(int fd, const char *body) {
         char instr[64] = "";
         json_get_int(body, "channel", &ch);
         json_get_string(body, "instrument", instr, sizeof(instr));
-        rack_set_slot(ch, instr);
-        mcast_slot_set(ch, instr);
-        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        int err = rack_set_slot(ch, instr);
+        if (err == 0) {
+            mcast_slot_set(ch, instr);
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        } else {
+            rlen = snprintf(resp, sizeof(resp),
+                "{\"error\":\"slot_set failed\",\"channel\":%d,\"instrument\":\"%s\"}", ch, instr);
+        }
     }
     else if (strcmp(type_str, "slot_clear") == 0) {
         int ch = 0;
@@ -757,6 +893,291 @@ static void http_handle_api(int fd, const char *body) {
         }
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
+    else if (strcmp(type_str, "keyseq_spec") == 0) {
+        int ch = -1;
+        json_get_int(body, "channel", &ch);
+
+        int pos = 0;
+        int speclen = (int)strlen(KEYSEQ_SPEC_JSON);
+        memcpy(resp, KEYSEQ_SPEC_JSON, (size_t)(speclen - 1));
+        pos = speclen - 1;
+
+        /* All instrument type param schemas */
+        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), ",\"instruments\":{");
+
+        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+            "\"fm-synth\":{\"params\":["
+            "{\"name\":\"carrier_ratio\",\"min\":0.1,\"max\":4,\"default\":1,\"type\":\"float\"},"
+            "{\"name\":\"mod_ratio\",\"min\":0.1,\"max\":15,\"default\":2,\"type\":\"float\"},"
+            "{\"name\":\"mod_index\",\"min\":0,\"max\":15,\"default\":2.5,\"type\":\"float\"},"
+            "{\"name\":\"attack\",\"min\":0.001,\"max\":1,\"default\":0.001,\"type\":\"float\"},"
+            "{\"name\":\"decay\",\"min\":0.01,\"max\":3,\"default\":0.3,\"type\":\"float\"},"
+            "{\"name\":\"sustain\",\"min\":0,\"max\":1,\"default\":0.5,\"type\":\"float\"},"
+            "{\"name\":\"release\",\"min\":0.01,\"max\":4,\"default\":0.3,\"type\":\"float\"},"
+            "{\"name\":\"feedback\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"}"
+            "]},"
+            "\"sub-synth\":{\"params\":["
+            "{\"name\":\"waveform\",\"min\":0,\"max\":5,\"default\":0,\"type\":\"int\",\"labels\":[\"Saw\",\"Square\",\"Pulse\",\"Tri\",\"Sine\",\"Noise\"]},"
+            "{\"name\":\"pulse_width\",\"min\":0.05,\"max\":0.95,\"default\":0.5,\"type\":\"float\"},"
+            "{\"name\":\"filter_cutoff\",\"min\":20,\"max\":20000,\"default\":2000,\"type\":\"float\",\"scale\":\"log\"},"
+            "{\"name\":\"filter_reso\",\"min\":0,\"max\":1,\"default\":0.2,\"type\":\"float\"},"
+            "{\"name\":\"filter_env_depth\",\"min\":-1,\"max\":1,\"default\":0.8,\"type\":\"float\"},"
+            "{\"name\":\"filt_attack\",\"min\":0.001,\"max\":5,\"default\":0.001,\"type\":\"float\"},"
+            "{\"name\":\"filt_decay\",\"min\":0.001,\"max\":5,\"default\":0.15,\"type\":\"float\"},"
+            "{\"name\":\"filt_sustain\",\"min\":0,\"max\":1,\"default\":0.2,\"type\":\"float\"},"
+            "{\"name\":\"filt_release\",\"min\":0.001,\"max\":5,\"default\":0.2,\"type\":\"float\"},"
+            "{\"name\":\"amp_attack\",\"min\":0.001,\"max\":5,\"default\":0.001,\"type\":\"float\"},"
+            "{\"name\":\"amp_decay\",\"min\":0.001,\"max\":5,\"default\":0.1,\"type\":\"float\"},"
+            "{\"name\":\"amp_sustain\",\"min\":0,\"max\":1,\"default\":0.8,\"type\":\"float\"},"
+            "{\"name\":\"amp_release\",\"min\":0.001,\"max\":5,\"default\":0.15,\"type\":\"float\"}"
+            "]},"
+            "\"ym2413\":{\"params\":["
+            "{\"name\":\"instrument\",\"min\":0,\"max\":15,\"default\":1,\"type\":\"int\"},"
+            "{\"name\":\"volume\",\"min\":0,\"max\":1,\"default\":1,\"type\":\"float\"},"
+            "{\"name\":\"rhythm\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"bool\"},"
+            "{\"name\":\"vibrato\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
+            "{\"name\":\"portamento\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
+            "{\"name\":\"pitchbend\",\"min\":0.5,\"max\":2,\"default\":1,\"type\":\"float\"}"
+            "]},"
+            "\"fm-drums\":{\"params\":["
+            "{\"name\":\"carrier_freq\",\"min\":20,\"max\":2000,\"default\":200,\"type\":\"float\"},"
+            "{\"name\":\"mod_freq\",\"min\":20,\"max\":2000,\"default\":300,\"type\":\"float\"},"
+            "{\"name\":\"mod_index\",\"min\":0,\"max\":20,\"default\":3,\"type\":\"float\"},"
+            "{\"name\":\"pitch_sweep\",\"min\":0,\"max\":5000,\"default\":500,\"type\":\"float\"},"
+            "{\"name\":\"pitch_decay\",\"min\":0.001,\"max\":1,\"default\":0.05,\"type\":\"float\"},"
+            "{\"name\":\"decay\",\"min\":0.01,\"max\":2,\"default\":0.2,\"type\":\"float\"},"
+            "{\"name\":\"noise_amt\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
+            "{\"name\":\"click_amt\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
+            "{\"name\":\"feedback\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"}"
+            "]}"
+            "}");
+
+        /* Active channel state */
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            if (slot->active && slot->state) {
+                const char *tname = g_type_registry[slot->type_idx]->name;
+                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                    ",\"channel\":%d,\"active_instrument\":\"%s\",\"current_values\":[", ch, tname);
+
+                if (strcmp(tname, "fm-synth") == 0) {
+                    FMSynth *s = (FMSynth *)slot->state;
+                    float *lp = &s->live_params.carrier_ratio;
+                    const char *names[] = {"carrier_ratio","mod_ratio","mod_index","attack","decay","sustain","release","feedback"};
+                    for (int p = 0; p < 8; p++)
+                        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                            "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)lp[p]);
+                }
+                else if (strcmp(tname, "sub-synth") == 0) {
+                    SubSynth *s = (SubSynth *)slot->state;
+                    float vals[] = {(float)s->params.waveform, s->params.pulse_width,
+                        s->params.filter_cutoff, s->params.filter_reso, s->params.filter_env_depth,
+                        s->params.filt_attack, s->params.filt_decay, s->params.filt_sustain, s->params.filt_release,
+                        s->params.amp_attack, s->params.amp_decay, s->params.amp_sustain, s->params.amp_release};
+                    const char *names[] = {"waveform","pulse_width","filter_cutoff","filter_reso","filter_env_depth",
+                        "filt_attack","filt_decay","filt_sustain","filt_release",
+                        "amp_attack","amp_decay","amp_sustain","amp_release"};
+                    for (int p = 0; p < 13; p++)
+                        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                            "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)vals[p]);
+                }
+                else if (strcmp(tname, "fm-drums") == 0) {
+                    FMDrumState *ds = (FMDrumState *)slot->state;
+                    int en = ds->editing_note; if (en < 0 || en >= FMD_NUM_NOTES) en = 36;
+                    const FMDrumDef *d = &ds->notes[en].def;
+                    float vals[] = {d->carrier_freq, d->mod_freq, d->mod_index, d->pitch_sweep,
+                        d->pitch_decay, d->decay, d->noise_amt, d->click_amt, d->feedback};
+                    const char *names[] = {"carrier_freq","mod_freq","mod_index","pitch_sweep",
+                        "pitch_decay","decay","noise_amt","click_amt","feedback"};
+                    for (int p = 0; p < 9; p++)
+                        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                            "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)vals[p]);
+                }
+                else if (strcmp(tname, "ym2413") == 0) {
+                    YM2413State *y = (YM2413State *)slot->state;
+                    pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                        "{\"name\":\"instrument\",\"value\":%d},{\"name\":\"volume\",\"value\":%.4f},"
+                        "{\"name\":\"rhythm\",\"value\":%d}",
+                        y->current_instrument, (double)y->volume, y->rhythm_mode);
+                }
+
+                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), "]");
+            } else {
+                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                    ",\"channel\":%d,\"active_instrument\":null", ch);
+            }
+        }
+
+        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), "}");
+        rlen = pos;
+    }
+    else if (strcmp(type_str, "keyseq_preview") == 0) {
+        int ch = 0;
+        int note = 60, velocity = 100;
+        json_get_int(body, "channel", &ch);
+        json_get_int(body, "note", &note);
+        json_get_int(body, "velocity", &velocity);
+
+        if (ch < 0 || ch >= MAX_SLOTS) {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"bad channel\"}");
+        } else {
+            RackSlot *slot = &g_rack.slots[ch];
+            KeySeq *ks = NULL;
+            if (slot->active && slot->state) {
+                const char *tname = g_type_registry[slot->type_idx]->name;
+                if (strcmp(tname, "fm-synth") == 0) ks = &((FMSynth *)slot->state)->keyseq;
+                else if (strcmp(tname, "sub-synth") == 0) ks = &((SubSynth *)slot->state)->keyseq;
+                else if (strcmp(tname, "ym2413") == 0) ks = &((YM2413State *)slot->state)->keyseq;
+                else if (strcmp(tname, "fm-drums") == 0) ks = &((FMDrumState *)slot->state)->keyseq;
+            }
+
+            if (!ks || !ks->enabled || (!ks->num_steps && !ks->algo_mode)) {
+                rlen = snprintf(resp, sizeof(resp),
+                    "{\"error\":\"no keyseq on channel %d\",\"dsl\":\"\",\"steps\":[],\"end_step\":-1}", ch);
+            } else {
+                float bpm = ks->bpm > 0 ? ks->bpm : 120.0f;
+
+                /* Compute runtime seed (same logic as keyseq_note_on) */
+                uint32_t seed;
+                if (ks->expr_seed.valid) {
+                    KeySeqCtx sc = {
+                        .n = (float)note, .v = (float)velocity,
+                        .rv = (float)velocity / 127.0f, .root = (float)note,
+                        .i = 0, .time = 0, .gate = 0, .held = 1.0f
+                    };
+                    float sv = ke_eval(&ks->expr_seed, &sc);
+                    float hf = fmodf(fabsf(sv) * 2654435.761f, 4294967000.0f);
+                    seed = (uint32_t)hf;
+                    if (!seed) seed = 1;
+                } else {
+                    struct timespec ts;
+                    clock_gettime(CLOCK_MONOTONIC, &ts);
+                    seed = (uint32_t)(ts.tv_nsec ^ (ts.tv_sec * 1000003)) | 1;
+                }
+                /* Local RNG/noise state — does not touch globals */
+                uint32_t local_rand = seed;
+                fnl_state local_fnl = fnlCreateState();
+                local_fnl.noise_type = FNL_NOISE_PERLIN;
+                local_fnl.frequency = 1.0f;
+                local_fnl.seed = (int)seed;
+
+                float root_vel = (float)velocity / 127.0f;
+                float algo_n = (float)note, algo_v = root_vel;
+                float algo_t = ks->step_beats, algo_g = ks->gate_beats;
+                float total_beats = 0;
+                int end_step = -1;
+                const int max_steps = 512;
+
+                int pos = 0;
+                char esc_dsl[512];
+                json_escape(esc_dsl, sizeof(esc_dsl), ks->source);
+                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                    "{\"channel\":%d,\"dsl\":\"%s\",\"seed\":%u,\"bpm\":%.1f,"
+                    "\"algo\":%d,\"gated\":%d,\"loop\":%d,"
+                    "\"step_beats\":%.3f,\"gate_beats\":%.3f,\"steps\":[",
+                    ch, esc_dsl, seed, (double)bpm,
+                    ks->algo_mode, ks->gated, ks->loop,
+                    (double)ks->step_beats, (double)ks->gate_beats);
+
+                for (int i = 0; i < max_steps && pos < SSE_BUF_SIZE - 256; i++) {
+                    float cur_n, cur_v;
+
+                    if (i == 0 && ks->algo_mode) {
+                        cur_n = (float)note;
+                        cur_v = root_vel;
+                    } else if (ks->algo_mode) {
+                        float time_sec = total_beats * 60.0f / bpm;
+                        KeySeqCtx ctx = {
+                            .n = algo_n, .v = algo_v, .t = algo_t, .g = algo_g,
+                            .i = (float)i, .root = (float)note, .rv = root_vel,
+                            .time = time_sec, .bu = 0, .gate = 0, .held = 1,
+                            .seed = (float)seed,
+                            .local_rand = &local_rand, .local_fnl = &local_fnl
+                        };
+                        float new_n = ks->expr_n.valid ? ke_eval(&ks->expr_n, &ctx) : ctx.n;
+                        float new_v = ks->expr_v.valid ? ke_eval(&ks->expr_v, &ctx) : ctx.v;
+                        float new_t = ks->expr_t.valid ? ke_eval(&ks->expr_t, &ctx) : ctx.t;
+                        float new_g = ks->expr_g.valid ? ke_eval(&ks->expr_g, &ctx) : ctx.g;
+                        algo_n = new_n; algo_v = new_v;
+                        algo_t = new_t > 0.001f ? new_t : 0.001f;
+                        algo_g = new_g > 0.001f ? new_g : 0.001f;
+                        cur_n = algo_n; cur_v = algo_v;
+                    } else {
+                        if (i >= ks->num_steps) {
+                            if (ks->loop) {
+                                int idx = i % ks->num_steps;
+                                cur_n = (float)(note + ks->offsets[idx]);
+                                cur_v = root_vel * ks->levels[idx];
+                            } else { end_step = i; break; }
+                        } else {
+                            cur_n = (float)(note + ks->offsets[i]);
+                            cur_v = root_vel * ks->levels[i];
+                        }
+                    }
+
+                    int midi = (int)roundf(cur_n);
+                    if (midi < 0) midi = 0; if (midi > 127) midi = 127;
+                    float cents = (cur_n - (float)midi) * 100.0f;
+                    float beat_pos = total_beats;
+
+                    pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                        "%s{\"i\":%d,\"n\":%.2f,\"midi\":%d,\"v\":%.4f,"
+                        "\"t\":%.4f,\"g\":%.4f,\"cents\":%.1f,\"beat\":%.3f}",
+                        i ? "," : "", i, (double)cur_n, midi, (double)cur_v,
+                        (double)algo_t, (double)algo_g, (double)cents, (double)beat_pos);
+
+                    total_beats += algo_t;
+
+                    if (ks->algo_mode && ks->expr_end.valid && i > 0) {
+                        KeySeqCtx ectx = {
+                            .n = algo_n, .v = algo_v, .t = algo_t, .g = algo_g,
+                            .i = (float)i, .root = (float)note, .rv = root_vel,
+                            .time = total_beats * 60.0f / bpm, .seed = (float)seed,
+                            .local_rand = &local_rand, .local_fnl = &local_fnl
+                        };
+                        if (ke_eval(&ks->expr_end, &ectx) != 0.0f) { end_step = i; break; }
+                    }
+                }
+
+                char end_reason[64] = "none";
+                if (end_step >= 0 && ks->expr_end.valid) {
+                    const char *ep = strstr(ks->source, "end:");
+                    if (ep) { ep += 4; const char *ee = ep; while (*ee && *ee != ';') ee++;
+                        int el = (int)(ee - ep); if (el > 0 && el < 63) { memcpy(end_reason, ep, (size_t)el); end_reason[el] = '\0'; }
+                    }
+                } else if (end_step >= 0) { snprintf(end_reason, sizeof(end_reason), "max"); }
+
+                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                    "],\"end_step\":%d,\"end_reason\":\"%s\",\"total_beats\":%.3f,\"total_steps\":%d}",
+                    end_step, end_reason, (double)total_beats,
+                    end_step >= 0 ? end_step + 1 : (int)(total_beats / algo_t));
+                rlen = pos;
+            }
+        }
+    }
+    else if (strcmp(type_str, "panic") == 0) {
+        /* All notes off on all channels, stop all keyseqs */
+        for (int ch = 0; ch < MAX_SLOTS; ch++) {
+            RackSlot *slot = &g_rack.slots[ch];
+            if (!atomic_load(&slot->active) || !slot->state) continue;
+            InstrumentType *itype = g_type_registry[slot->type_idx];
+
+            /* Send CC 123 (All Notes Off) */
+            uint8_t status = (uint8_t)(0xB0 | ch);
+            itype->midi(slot->state, status, 123, 0);
+
+            /* Stop keyseq */
+            KeySeq *ks = NULL;
+            const char *tname = itype->name;
+            if (strcmp(tname, "fm-synth") == 0) ks = &((FMSynth *)slot->state)->keyseq;
+            else if (strcmp(tname, "sub-synth") == 0) ks = &((SubSynth *)slot->state)->keyseq;
+            else if (strcmp(tname, "ym2413") == 0) ks = &((YM2413State *)slot->state)->keyseq;
+            else if (strcmp(tname, "fm-drums") == 0) ks = &((FMDrumState *)slot->state)->keyseq;
+            if (ks) keyseq_stop(ks);
+        }
+        fprintf(stderr, "[miniwave] PANIC — all notes off, all keyseqs stopped\n");
+        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+    }
     else {
         rlen = snprintf(resp, sizeof(resp), "{\"error\":\"unknown type: %s\"}", type_str);
     }
@@ -936,6 +1357,7 @@ static void *http_thread_fn(void *arg) {
                             g_http_clients[i].fd = client_fd;
                             g_http_clients[i].is_sse = 1;
                             g_http_clients[i].detail_channel = -1;
+                            g_http_clients[i].client_id = g_next_client_id++;
                             registered = 1;
                             break;
                         }
@@ -946,6 +1368,12 @@ static void *http_thread_fn(void *arg) {
                         close(client_fd);
                     } else {
                         char json[SSE_BUF_SIZE];
+
+                        /* Send client_id so /api/detail can target this client */
+                        int cid = g_next_client_id - 1;
+                        snprintf(json, sizeof(json), "{\"client_id\":%d}", cid);
+                        sse_send_event(client_fd, "hello", json);
+
                         build_rack_status_json(json, (int)sizeof(json));
                         sse_send_event(client_fd, "rack_status", json);
 
@@ -970,15 +1398,21 @@ static void *http_thread_fn(void *arg) {
                 else if (strcmp(method, "POST") == 0 && strcmp(path, "/api/detail") == 0) {
                     const char *body = strstr(reqbuf, "\r\n\r\n");
                     int detail_ch = -1;
+                    int cid = -1;
                     if (body) {
                         body += 4;
                         json_get_int(body, "channel", &detail_ch);
+                        json_get_int(body, "client_id", &cid);
                     }
 
                     pthread_mutex_lock(&g_http_lock);
                     for (int i = 0; i < MAX_HTTP_CLIENTS; i++) {
                         if (g_http_clients[i].fd >= 0 && g_http_clients[i].is_sse) {
-                            g_http_clients[i].detail_channel = detail_ch;
+                            /* If client_id provided, only update that client.
+                             * Otherwise fall back to updating all (legacy). */
+                            if (cid < 0 || g_http_clients[i].client_id == cid) {
+                                g_http_clients[i].detail_channel = detail_ch;
+                            }
                         }
                     }
                     pthread_mutex_unlock(&g_http_lock);

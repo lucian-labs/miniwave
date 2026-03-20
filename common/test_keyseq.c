@@ -136,9 +136,9 @@ static void test_noise(void) {
     v = ke_eval(&e, &ctx);
     CHECK(v != 0.0f, "noise(1.5,2.3) != 0");
 
-    ke_compile(&e, "noise(1,2,3)");
+    ke_compile(&e, "noise(1.1,2.2,3.3)");
     v = ke_eval(&e, &ctx);
-    CHECK(v != 0.0f, "noise(1,2,3) != 0");
+    CHECK(v != 0.0f, "noise(1.1,2.2,3.3) != 0");
 
     /* Deterministic */
     ke_compile(&e, "noise(3.7)");
