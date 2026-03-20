@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <alsa/asoundlib.h>
 #include <jack/jack.h>
+#include <jack/midiport.h>
 
 /* ── OSC helpers (defined before fm-synth.h which uses them) ────────── */
 
@@ -162,6 +163,12 @@ static inline float master_limiter(float sample) {
 static InstrumentType *g_type_registry[MAX_INSTRUMENT_TYPES];
 static int             g_n_types = 0;
 
+/* Forward declarations */
+static void state_mark_dirty(void);
+static int json_get_string(const char *json, const char *key, char *out, int max);
+static int json_get_int(const char *json, const char *key, int *out);
+static int json_get_float(const char *json, const char *key, float *out);
+
 static void rack_register_type(InstrumentType *type) {
     if (g_n_types < MAX_INSTRUMENT_TYPES) {
         g_type_registry[g_n_types++] = type;
@@ -234,6 +241,7 @@ static int rack_set_slot(int channel, const char *type_name) {
     slot->active = 1;
 
     fprintf(stderr, "[miniwave] slot %d = %s\n", channel, itype->display_name);
+    state_mark_dirty();
     return 0;
 }
 
@@ -254,6 +262,250 @@ static void rack_clear_slot(int channel) {
     slot->solo = 0;
 
     fprintf(stderr, "[miniwave] slot %d cleared\n", channel);
+    state_mark_dirty();
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  State Persistence — auto-save/load rack to ~/.config/miniwave/rack.json
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static char g_state_path[512] = "";
+static volatile int g_state_dirty = 0; /* set to 1 when state changes, cleared after save */
+
+static void state_mark_dirty(void) { g_state_dirty = 1; }
+
+static void state_init_path(void) {
+    const char *cfg = getenv("XDG_CONFIG_HOME");
+    if (cfg && cfg[0]) {
+        snprintf(g_state_path, sizeof(g_state_path), "%s/miniwave/rack.json", cfg);
+    } else {
+        const char *home = getenv("HOME");
+        if (!home) home = "/tmp";
+        snprintf(g_state_path, sizeof(g_state_path), "%s/.config/miniwave/rack.json", home);
+    }
+}
+
+/* Ensure parent directory exists */
+static void state_mkdir(void) {
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s", g_state_path);
+    char *slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = '\0';
+        /* mkdir -p (two levels) */
+        char *s2 = strrchr(dir, '/');
+        if (s2) { *s2 = '\0'; mkdir(dir, 0755); *s2 = '/'; }
+        mkdir(dir, 0755);
+    }
+}
+
+static void state_save(void) {
+    if (!g_state_path[0]) return;
+    state_mkdir();
+
+    FILE *f = fopen(g_state_path, "w");
+    if (!f) return;
+
+    fprintf(f, "{\n  \"master_volume\": %.4f,\n  \"slots\": [\n",
+            (double)g_rack.master_volume);
+
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        RackSlot *slot = &g_rack.slots[i];
+        fprintf(f, "    {");
+
+        if (slot->active && slot->state && slot->type_idx >= 0) {
+            InstrumentType *itype = g_type_registry[slot->type_idx];
+            fprintf(f, "\"type\":\"%s\",\"volume\":%.4f,\"mute\":%d,\"solo\":%d",
+                    itype->name, (double)slot->volume, slot->mute, slot->solo);
+
+            /* FM synth params */
+            if (strcmp(itype->name, "fm-synth") == 0) {
+                FMSynth *s = (FMSynth *)slot->state;
+                fprintf(f, ",\"preset\":%d,\"override\":%d", s->current_preset, s->live_params.override);
+                if (s->live_params.override) {
+                    fprintf(f, ",\"params\":{\"carrier_ratio\":%.4f,\"mod_ratio\":%.4f,"
+                            "\"mod_index\":%.4f,\"attack\":%.4f,\"decay\":%.4f,"
+                            "\"sustain\":%.4f,\"release\":%.4f,\"feedback\":%.4f}",
+                            (double)s->live_params.carrier_ratio,
+                            (double)s->live_params.mod_ratio,
+                            (double)s->live_params.mod_index,
+                            (double)s->live_params.attack,
+                            (double)s->live_params.decay,
+                            (double)s->live_params.sustain,
+                            (double)s->live_params.release,
+                            (double)s->live_params.feedback);
+                }
+            }
+            /* Sub synth params */
+            else if (strcmp(itype->name, "sub-synth") == 0) {
+                SubSynth *s = (SubSynth *)slot->state;
+                fprintf(f, ",\"params\":{\"waveform\":%d,\"pulse_width\":%.4f,"
+                        "\"filter_cutoff\":%.4f,\"filter_reso\":%.4f,"
+                        "\"filter_env_depth\":%.4f,"
+                        "\"filt_attack\":%.4f,\"filt_decay\":%.4f,"
+                        "\"filt_sustain\":%.4f,\"filt_release\":%.4f,"
+                        "\"amp_attack\":%.4f,\"amp_decay\":%.4f,"
+                        "\"amp_sustain\":%.4f,\"amp_release\":%.4f}",
+                        s->params.waveform,
+                        (double)s->params.pulse_width,
+                        (double)s->params.filter_cutoff,
+                        (double)s->params.filter_reso,
+                        (double)s->params.filter_env_depth,
+                        (double)s->params.filt_attack,
+                        (double)s->params.filt_decay,
+                        (double)s->params.filt_sustain,
+                        (double)s->params.filt_release,
+                        (double)s->params.amp_attack,
+                        (double)s->params.amp_decay,
+                        (double)s->params.amp_sustain,
+                        (double)s->params.amp_release);
+            }
+            /* YM2413 params */
+            else if (strcmp(itype->name, "ym2413") == 0) {
+                YM2413State *y = (YM2413State *)slot->state;
+                fprintf(f, ",\"instrument\":%d,\"rhythm_mode\":%d",
+                        y->current_instrument, y->rhythm_mode);
+            }
+        }
+
+        fprintf(f, "}%s\n", (i < MAX_SLOTS - 1) ? "," : "");
+    }
+
+    fprintf(f, "  ]\n}\n");
+    fclose(f);
+}
+
+static void state_load(void) {
+    if (!g_state_path[0]) return;
+
+    FILE *f = fopen(g_state_path, "r");
+    if (!f) {
+        fprintf(stderr, "[miniwave] no saved state at %s\n", g_state_path);
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    if (len <= 0 || len > 65536) { fclose(f); return; }
+    fseek(f, 0, SEEK_SET);
+
+    char *json = calloc(1, (size_t)(len + 1));
+    if (!json) { fclose(f); return; }
+    size_t nread = fread(json, 1, (size_t)len, f);
+    fclose(f);
+    if (nread == 0) { free(json); return; }
+
+    /* Parse master volume */
+    float mv;
+    if (json_get_float(json, "master_volume", &mv) == 0)
+        g_rack.master_volume = mv;
+
+    /* Parse slots array — find each slot object by scanning for '{' after "slots":[ */
+    const char *slots_start = strstr(json, "\"slots\"");
+    if (!slots_start) { free(json); return; }
+    slots_start = strchr(slots_start, '[');
+    if (!slots_start) { free(json); return; }
+    slots_start++;
+
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        /* Find next '{' */
+        const char *obj = strchr(slots_start, '{');
+        if (!obj) break;
+
+        /* Find matching '}' (no nesting concerns — params objects are inside) */
+        int depth = 0;
+        const char *end = obj;
+        do {
+            if (*end == '{') depth++;
+            else if (*end == '}') depth--;
+            end++;
+        } while (depth > 0 && *end);
+
+        /* Extract slot JSON substring */
+        int slen = (int)(end - obj);
+        char *slot_json = calloc(1, (size_t)(slen + 1));
+        if (!slot_json) break;
+        memcpy(slot_json, obj, (size_t)slen);
+
+        char type_name[64] = "";
+        if (json_get_string(slot_json, "type", type_name, sizeof(type_name)) == 0 && type_name[0]) {
+            /* Activate slot */
+            if (rack_set_slot(i, type_name) == 0) {
+                RackSlot *slot = &g_rack.slots[i];
+                InstrumentType *itype = g_type_registry[slot->type_idx];
+
+                float vol;
+                int ival;
+                if (json_get_float(slot_json, "volume", &vol) == 0) slot->volume = vol;
+                if (json_get_int(slot_json, "mute", &ival) == 0) slot->mute = ival;
+                if (json_get_int(slot_json, "solo", &ival) == 0) slot->solo = ival;
+
+                /* FM synth restore */
+                if (strcmp(itype->name, "fm-synth") == 0) {
+                    FMSynth *s = (FMSynth *)slot->state;
+                    int preset;
+                    if (json_get_int(slot_json, "preset", &preset) == 0 && preset >= 0 && preset < NUM_PRESETS) {
+                        s->current_preset = preset;
+                        fm_load_preset_params(s, preset);
+                    }
+                    int ovr;
+                    if (json_get_int(slot_json, "override", &ovr) == 0 && ovr) {
+                        s->live_params.override = 1;
+                        /* Restore override params — search within "params":{...} */
+                        const char *pp = strstr(slot_json, "\"params\"");
+                        if (pp) {
+                            float fv;
+                            if (json_get_float(pp, "carrier_ratio", &fv) == 0) s->live_params.carrier_ratio = fv;
+                            if (json_get_float(pp, "mod_ratio", &fv) == 0) s->live_params.mod_ratio = fv;
+                            if (json_get_float(pp, "mod_index", &fv) == 0) s->live_params.mod_index = fv;
+                            if (json_get_float(pp, "attack", &fv) == 0) s->live_params.attack = fv;
+                            if (json_get_float(pp, "decay", &fv) == 0) s->live_params.decay = fv;
+                            if (json_get_float(pp, "sustain", &fv) == 0) s->live_params.sustain = fv;
+                            if (json_get_float(pp, "release", &fv) == 0) s->live_params.release = fv;
+                            if (json_get_float(pp, "feedback", &fv) == 0) s->live_params.feedback = fv;
+                        }
+                    }
+                }
+                /* Sub synth restore */
+                else if (strcmp(itype->name, "sub-synth") == 0) {
+                    SubSynth *s = (SubSynth *)slot->state;
+                    const char *pp = strstr(slot_json, "\"params\"");
+                    if (pp) {
+                        int wf;
+                        float fv;
+                        if (json_get_int(pp, "waveform", &wf) == 0) s->params.waveform = wf % SUB_WAVE_COUNT;
+                        if (json_get_float(pp, "pulse_width", &fv) == 0) s->params.pulse_width = fv;
+                        if (json_get_float(pp, "filter_cutoff", &fv) == 0) s->params.filter_cutoff = fv;
+                        if (json_get_float(pp, "filter_reso", &fv) == 0) s->params.filter_reso = fv;
+                        if (json_get_float(pp, "filter_env_depth", &fv) == 0) s->params.filter_env_depth = fv;
+                        if (json_get_float(pp, "filt_attack", &fv) == 0) s->params.filt_attack = fv;
+                        if (json_get_float(pp, "filt_decay", &fv) == 0) s->params.filt_decay = fv;
+                        if (json_get_float(pp, "filt_sustain", &fv) == 0) s->params.filt_sustain = fv;
+                        if (json_get_float(pp, "filt_release", &fv) == 0) s->params.filt_release = fv;
+                        if (json_get_float(pp, "amp_attack", &fv) == 0) s->params.amp_attack = fv;
+                        if (json_get_float(pp, "amp_decay", &fv) == 0) s->params.amp_decay = fv;
+                        if (json_get_float(pp, "amp_sustain", &fv) == 0) s->params.amp_sustain = fv;
+                        if (json_get_float(pp, "amp_release", &fv) == 0) s->params.amp_release = fv;
+                    }
+                }
+                /* YM2413 restore */
+                else if (strcmp(itype->name, "ym2413") == 0) {
+                    YM2413State *y = (YM2413State *)slot->state;
+                    int inst, rhy;
+                    if (json_get_int(slot_json, "instrument", &inst) == 0 && inst >= 0 && inst <= 15)
+                        y->current_instrument = inst;
+                    if (json_get_int(slot_json, "rhythm_mode", &rhy) == 0)
+                        y->rhythm_mode = rhy;
+                }
+            }
+        }
+
+        free(slot_json);
+        slots_start = end;
+    }
+
+    free(json);
+    fprintf(stderr, "[miniwave] state restored from %s\n", g_state_path);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -414,12 +666,14 @@ static inline void seq_dispatch(snd_seq_event_t *ev) {
                     (uint8_t)(0xB0 | ch),
                     (uint8_t)ev->data.control.param,
                     (uint8_t)ev->data.control.value);
+        state_mark_dirty();
         break;
     case SND_SEQ_EVENT_PGMCHANGE:
         itype->midi(slot->state,
                     (uint8_t)(0xC0 | ch),
                     (uint8_t)ev->data.control.value,
                     0);
+        state_mark_dirty();
         break;
     case SND_SEQ_EVENT_PITCHBEND: {
         /* snd_seq pitch bend: -8192..8191 → 14-bit 0..16383 */
@@ -443,6 +697,36 @@ static inline void seq_dispatch(snd_seq_event_t *ev) {
     }
 }
 
+/* Dispatch raw MIDI bytes (used by JACK MIDI path) */
+static inline void midi_dispatch_raw(const uint8_t *data, int len) {
+    if (len < 1) return;
+    uint8_t status = data[0];
+    int ch = status & 0x0F;
+    if (ch < 0 || ch >= MAX_SLOTS) return;
+
+    RackSlot *slot = &g_rack.slots[ch];
+    if (!slot->active || !slot->state) return;
+    InstrumentType *itype = g_type_registry[slot->type_idx];
+
+    uint8_t type = status & 0xF0;
+    uint8_t d1 = (len > 1) ? data[1] : 0;
+    uint8_t d2 = (len > 2) ? data[2] : 0;
+
+    switch (type) {
+    case 0x90: case 0x80: case 0xE0:
+        itype->midi(slot->state, status, d1, d2);
+        break;
+    case 0xB0:
+        itype->midi(slot->state, status, d1, d2);
+        state_mark_dirty();
+        break;
+    case 0xC0: case 0xD0:
+        itype->midi(slot->state, status, d1, 0);
+        state_mark_dirty();
+        break;
+    }
+}
+
 /* ── MIDI Thread (sequencer event loop) ────────────────────────────── */
 
 typedef struct {
@@ -459,7 +743,7 @@ static void *midi_thread_fn(void *arg) {
     snd_seq_poll_descriptors(g_seq, pfds, (unsigned int)npfds, POLLIN);
 
     while (!g_quit) {
-        int ret = poll(pfds, (nfds_t)npfds, 50);
+        int ret = poll(pfds, (nfds_t)npfds, 1);
         if (ret <= 0) continue;
 
         snd_seq_event_t *ev = NULL;
@@ -613,6 +897,7 @@ static void *osc_thread_fn(void *arg) {
             if (vol < 0.0f) vol = 0.0f;
             if (vol > 1.0f) vol = 1.0f;
             g_rack.master_volume = vol;
+            state_mark_dirty();
         }
         /* /rack/local_mute  i — mute ALSA output, bus-only mode */
         else if (strcmp(osc_addr, "/rack/local_mute") == 0 && ai >= 1) {
@@ -780,6 +1065,7 @@ static void *osc_thread_fn(void *arg) {
                         InstrumentType *itype = g_type_registry[slot->type_idx];
                         itype->osc_handle(slot->state, sub_path,
                                           arg_i, ai, arg_f, afi);
+                        state_mark_dirty();
                     }
                 }
             }
@@ -1039,6 +1325,41 @@ static int build_ch_status_json(int ch, char *buf, int max) {
             y->rhythm_mode, active_ch);
     }
 
+    /* Sub synth */
+    if (strcmp(itype->name, "sub-synth") == 0) {
+        SubSynth *sub = (SubSynth *)slot->state;
+        int active_v = 0;
+        for (int v = 0; v < SUB_MAX_VOICES; v++)
+            if (sub->voices[v].active) active_v++;
+
+        const char *wave_names[] = {"Saw","Square","Pulse","Triangle","Sine","Noise"};
+        const char *wname = (sub->params.waveform >= 0 && sub->params.waveform < SUB_WAVE_COUNT)
+                            ? wave_names[sub->params.waveform] : "Saw";
+
+        return snprintf(buf, (size_t)max,
+            "{\"type\":\"ch_status\",\"channel\":%d,"
+            "\"instrument_type\":\"sub-synth\","
+            "\"waveform\":%d,\"waveform_name\":\"%s\","
+            "\"volume\":%.4f,"
+            "\"params\":{"
+            "\"filter_cutoff\":%.4f,\"filter_reso\":%.4f,"
+            "\"filter_env_depth\":%.4f,\"pulse_width\":%.4f,"
+            "\"filt_attack\":%.4f,\"filt_decay\":%.4f,"
+            "\"filt_sustain\":%.4f,\"filt_release\":%.4f,"
+            "\"amp_attack\":%.4f,\"amp_decay\":%.4f,"
+            "\"amp_sustain\":%.4f,\"amp_release\":%.4f},"
+            "\"active_voices\":%d}",
+            ch, sub->params.waveform, wname,
+            (double)sub->volume,
+            (double)sub->params.filter_cutoff, (double)sub->params.filter_reso,
+            (double)sub->params.filter_env_depth, (double)sub->params.pulse_width,
+            (double)sub->params.filt_attack, (double)sub->params.filt_decay,
+            (double)sub->params.filt_sustain, (double)sub->params.filt_release,
+            (double)sub->params.amp_attack, (double)sub->params.amp_decay,
+            (double)sub->params.amp_sustain, (double)sub->params.amp_release,
+            active_v);
+    }
+
     /* Default: FM synth */
     FMSynth *s = (FMSynth *)slot->state;
     const char *pname = (s->current_preset >= 0 && s->current_preset < NUM_PRESETS)
@@ -1203,6 +1524,7 @@ static void http_handle_api(int fd, const char *body) {
             if (val < 0.0f) val = 0.0f;
             if (val > 1.0f) val = 1.0f;
             g_rack.slots[ch].volume = val;
+            state_mark_dirty();
         }
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
@@ -1210,16 +1532,20 @@ static void http_handle_api(int fd, const char *body) {
         int ch = 0, val = 0;
         json_get_int(body, "channel", &ch);
         json_get_int(body, "value", &val);
-        if (ch >= 0 && ch < MAX_SLOTS)
+        if (ch >= 0 && ch < MAX_SLOTS) {
             g_rack.slots[ch].mute = val ? 1 : 0;
+            state_mark_dirty();
+        }
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
     else if (strcmp(type_str, "slot_solo") == 0) {
         int ch = 0, val = 0;
         json_get_int(body, "channel", &ch);
         json_get_int(body, "value", &val);
-        if (ch >= 0 && ch < MAX_SLOTS)
+        if (ch >= 0 && ch < MAX_SLOTS) {
             g_rack.slots[ch].solo = val ? 1 : 0;
+            state_mark_dirty();
+        }
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
     else if (strcmp(type_str, "master_volume") == 0) {
@@ -1228,6 +1554,7 @@ static void http_handle_api(int fd, const char *body) {
         if (val < 0.0f) val = 0.0f;
         if (val > 1.0f) val = 1.0f;
         g_rack.master_volume = val;
+        state_mark_dirty();
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
     else if (strcmp(type_str, "local_mute") == 0) {
@@ -1285,6 +1612,7 @@ static void http_handle_api(int fd, const char *body) {
                 }
 
                 itype->osc_handle(slot->state, path, iargs, ni, fargs, nf);
+                state_mark_dirty();
             }
         }
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
@@ -1571,6 +1899,22 @@ static void *http_thread_fn(void *arg) {
             }
         }
 
+        /* Auto-save state (debounced: 2 seconds after last change) */
+        if (g_state_dirty) {
+            static struct timespec dirty_time = {0, 0};
+            if (dirty_time.tv_sec == 0) {
+                dirty_time = now;
+            } else {
+                long save_elapsed = (now.tv_sec - dirty_time.tv_sec) * 1000 +
+                                    (now.tv_nsec - dirty_time.tv_nsec) / 1000000;
+                if (save_elapsed >= 2000) {
+                    state_save();
+                    g_state_dirty = 0;
+                    dirty_time.tv_sec = 0;
+                }
+            }
+        }
+
         /* Small sleep to avoid busy-spin (10ms) */
         usleep(10000);
     }
@@ -1614,6 +1958,7 @@ typedef struct {
     jack_client_t *client;
     jack_port_t   *out_L;
     jack_port_t   *out_R;
+    jack_port_t   *midi_in;     /* JACK MIDI input — sample-accurate */
     float         *mix_buf;     /* interleaved stereo, allocated at activation */
     float         *slot_buf;    /* per-slot render scratch */
     int            buf_frames;  /* max frames (jack buffer size) */
@@ -1659,33 +2004,78 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
     }
 }
 
-/* JACK process callback — realtime thread, no malloc/printf/mutex */
+/* JACK process callback — realtime thread, no malloc/printf/mutex.
+ * Reads JACK MIDI events and renders audio in sample-accurate segments
+ * around MIDI event boundaries for zero-latency note response. */
 static int jack_process_cb(jack_nframes_t nframes, void *arg) {
     JackCtx *jctx = (JackCtx *)arg;
 
     float *out_L = (float *)jack_port_get_buffer(jctx->out_L, nframes);
     float *out_R = (float *)jack_port_get_buffer(jctx->out_R, nframes);
 
-    int frames = (int)nframes;
-    if (frames > jctx->buf_frames) frames = jctx->buf_frames;
+    int total_frames = (int)nframes;
+    if (total_frames > jctx->buf_frames) total_frames = jctx->buf_frames;
+    int sample_rate = (int)jack_get_sample_rate(jctx->client);
 
-    render_mix(jctx->mix_buf, jctx->slot_buf, frames,
-               (int)jack_get_sample_rate(jctx->client));
+    /* Read JACK MIDI events (already sorted by frame offset) */
+    void *midi_buf = jctx->midi_in
+        ? jack_port_get_buffer(jctx->midi_in, nframes) : NULL;
+    uint32_t midi_count = midi_buf ? jack_midi_get_event_count(midi_buf) : 0;
 
-    /* Write to bus if available */
-    if (jctx->bus && jctx->bus_slot >= 0) {
-        bus_write(jctx->bus, jctx->bus_slot, jctx->mix_buf, frames);
+    /* Render in segments between MIDI events for sample-accurate timing */
+    int pos = 0;           /* current sample position in output */
+    uint32_t midi_idx = 0; /* next MIDI event to process */
+
+    while (pos < total_frames) {
+        /* Find next MIDI event boundary */
+        int seg_end = total_frames;
+        while (midi_idx < midi_count) {
+            jack_midi_event_t ev;
+            if (jack_midi_event_get(&ev, midi_buf, midi_idx) != 0) {
+                midi_idx++;
+                continue;
+            }
+            int ev_frame = (int)ev.time;
+            if (ev_frame < pos) ev_frame = pos; /* past events fire now */
+
+            if (ev_frame == pos) {
+                /* Dispatch this MIDI event at exact sample position */
+                midi_dispatch_raw(ev.buffer, (int)ev.size);
+                midi_idx++;
+                continue;
+            }
+            /* Event is in the future — render up to it */
+            seg_end = ev_frame;
+            break;
+        }
+
+        /* Render segment [pos, seg_end) */
+        int seg_len = seg_end - pos;
+        if (seg_len > 0) {
+            render_mix(jctx->mix_buf, jctx->slot_buf, seg_len, sample_rate);
+
+            if (g_rack.local_mute) {
+                memset(out_L + pos, 0, sizeof(float) * (size_t)seg_len);
+                memset(out_R + pos, 0, sizeof(float) * (size_t)seg_len);
+            } else {
+                for (int i = 0; i < seg_len; i++) {
+                    out_L[pos + i] = jctx->mix_buf[i * 2];
+                    out_R[pos + i] = jctx->mix_buf[i * 2 + 1];
+                }
+            }
+        }
+
+        pos = seg_end;
     }
 
-    /* De-interleave to JACK planar buffers (or silence if local_mute) */
-    if (g_rack.local_mute) {
-        memset(out_L, 0, sizeof(float) * nframes);
-        memset(out_R, 0, sizeof(float) * nframes);
-    } else {
-        for (int i = 0; i < frames; i++) {
-            out_L[i] = jctx->mix_buf[i * 2];
-            out_R[i] = jctx->mix_buf[i * 2 + 1];
+    /* Write full buffer to bus if available */
+    if (jctx->bus && jctx->bus_slot >= 0) {
+        /* Reconstruct interleaved for bus from planar output */
+        for (int i = 0; i < total_frames; i++) {
+            jctx->mix_buf[i * 2]     = out_L[i];
+            jctx->mix_buf[i * 2 + 1] = out_R[i];
         }
+        bus_write(jctx->bus, jctx->bus_slot, jctx->mix_buf, total_frames);
     }
 
     return 0;
@@ -1715,12 +2105,17 @@ static int jack_init(void) {
         JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
     g_jack.out_R = jack_port_register(g_jack.client, "output_R",
         JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+    g_jack.midi_in = jack_port_register(g_jack.client, "midi_in",
+        JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
 
     if (!g_jack.out_L || !g_jack.out_R) {
         fprintf(stderr, "[miniwave] can't register JACK ports\n");
         jack_client_close(g_jack.client);
         g_jack.client = NULL;
         return -1;
+    }
+    if (!g_jack.midi_in) {
+        fprintf(stderr, "[miniwave] WARN: can't register JACK MIDI port (falling back to ALSA seq)\n");
     }
 
     /* Allocate render buffers sized to JACK's max buffer */
@@ -1735,10 +2130,11 @@ static int jack_init(void) {
         return -1;
     }
 
-    fprintf(stderr, "[miniwave] JACK client '%s' @ %uHz buf=%d\n",
+    fprintf(stderr, "[miniwave] JACK client '%s' @ %uHz buf=%d%s\n",
             jack_get_client_name(g_jack.client),
             jack_get_sample_rate(g_jack.client),
-            g_jack.buf_frames);
+            g_jack.buf_frames,
+            g_jack.midi_in ? " [JACK MIDI]" : "");
     return 0;
 }
 
@@ -1812,10 +2208,13 @@ int main(int argc, char *argv[]) {
     /* ── Init rack ─────────────────────────────────────────────── */
 
     rack_init();
+    state_init_path();
+    state_load(); /* restore previous session state */
 
-    /* Pre-configure channels with FM synth */
+    /* Pre-configure channels with FM synth (only if no saved state loaded them) */
     for (int i = 0; i < pre_config; i++) {
-        rack_set_slot(i, "fm-synth");
+        if (!g_rack.slots[i].active)
+            rack_set_slot(i, "fm-synth");
     }
 
     /* ── ALSA Sequencer MIDI ─────────────────────────────────────── */
@@ -2030,6 +2429,7 @@ int main(int argc, char *argv[]) {
     /* ── Shutdown ───────────────────────────────────────────────── */
 
     fprintf(stderr, "[miniwave] shutting down...\n");
+    state_save();
 
     if (midi_tid) pthread_join(midi_tid, NULL);
     if (osc_tid)  pthread_join(osc_tid, NULL);

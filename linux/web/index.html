@@ -420,6 +420,24 @@ html, body {
   height: 16px;
 }
 
+/* ADSR Canvas */
+.adsr-canvas {
+  width: 100%;
+  height: 120px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  touch-action: none;
+}
+.adsr-values {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--dim);
+  padding: 0 2px;
+}
+.adsr-values span { font-family: inherit; }
+
 /* Virtual Keyboard */
 .keyboard-section { display: flex; flex-direction: column; gap: 6px; }
 .keyboard-section h3 { font-size: 11px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
@@ -996,6 +1014,8 @@ function renderDetailPane() {
 
   if (slot.active && slot.type === 'fm-synth') {
     renderFMSynth(ch);
+  } else if (slot.active && slot.type === 'sub-synth') {
+    renderSubSynth(ch);
   } else if (slot.active && slot.type === 'ym2413') {
     renderYM2413(ch);
   } else if (!slot.active) {
@@ -1059,6 +1079,375 @@ function renderFMSynth(ch) {
     document.getElementById('detail-vol-val').textContent = val.toFixed(2);
     send({ type: 'ch', channel: ch, path: '/volume', fargs: [val] });
   });
+}
+
+// ── Subtractive Synth Detail Pane ────────────────────────────────
+
+const SUB_WAVE_NAMES = ['Saw', 'Square', 'Pulse', 'Triangle', 'Sine', 'Noise'];
+
+// Knob-style params (non-ADSR)
+const SUB_KNOB_DEFS = [
+  { key: 'filter_cutoff',    label: 'Cutoff',      log: true, min: 20, max: 20000, display: v => v < 1000 ? v.toFixed(0) + ' Hz' : (v/1000).toFixed(1) + ' kHz' },
+  { key: 'filter_reso',      label: 'Resonance',   min: 0,     max: 1,     step: 0.01,  display: v => v.toFixed(2) },
+  { key: 'filter_env_depth', label: 'Env Depth',   min: -1,    max: 1,     step: 0.01,  display: v => v.toFixed(2) },
+  { key: 'pulse_width',      label: 'Pulse Width', min: 0.05,  max: 0.95,  step: 0.01,  display: v => v.toFixed(2) },
+];
+
+// For updateDetail to find all sub-synth param keys
+const SUB_PARAM_DEFS = [
+  ...SUB_KNOB_DEFS,
+  { key: 'filt_attack',  label: 'Filt Atk',  min: 0.001, max: 5, display: v => v < 1 ? (v*1000).toFixed(0) + ' ms' : v.toFixed(2) + ' s' },
+  { key: 'filt_decay',   label: 'Filt Dec',  min: 0.001, max: 5, display: v => v < 1 ? (v*1000).toFixed(0) + ' ms' : v.toFixed(2) + ' s' },
+  { key: 'filt_sustain', label: 'Filt Sus',  min: 0,     max: 1, display: v => v.toFixed(2) },
+  { key: 'filt_release', label: 'Filt Rel',  min: 0.001, max: 5, display: v => v < 1 ? (v*1000).toFixed(0) + ' ms' : v.toFixed(2) + ' s' },
+  { key: 'amp_attack',   label: 'Amp Atk',   min: 0.001, max: 5, display: v => v < 1 ? (v*1000).toFixed(0) + ' ms' : v.toFixed(2) + ' s' },
+  { key: 'amp_decay',    label: 'Amp Dec',   min: 0.001, max: 5, display: v => v < 1 ? (v*1000).toFixed(0) + ' ms' : v.toFixed(2) + ' s' },
+  { key: 'amp_sustain',  label: 'Amp Sus',   min: 0,     max: 1, display: v => v.toFixed(2) },
+  { key: 'amp_release',  label: 'Amp Rel',   min: 0.001, max: 5, display: v => v < 1 ? (v*1000).toFixed(0) + ' ms' : v.toFixed(2) + ' s' },
+];
+
+/* Log cutoff helpers: slider 0-1 <-> 20Hz-20kHz */
+function cutoffToSlider(hz) { return Math.log(hz / 20) / Math.log(1000); }
+function sliderToCutoff(t)  { return 20 * Math.pow(1000, t); }
+
+/* Time helpers: slider 0-1 <-> 0.001s-5s (log) */
+function timeToSlider(t) { return Math.log(t / 0.001) / Math.log(5000); }
+function sliderToTime(s)  { return 0.001 * Math.pow(5000, s); }
+
+function fmtTime(v) { return v < 1 ? (v*1000).toFixed(0) + ' ms' : v.toFixed(2) + ' s'; }
+
+function renderSubSynth(ch) {
+  const body = document.getElementById('detail-body');
+  const cs = channelStates[ch] || {};
+  const params = cs.params || {};
+
+  body.innerHTML = `
+    <div class="params-section">
+      <div class="params-header">
+        <h3>Waveform</h3>
+        <button class="reset-btn" id="sub-reset-btn">Reset</button>
+      </div>
+      <div class="wave-row" id="wave-row"></div>
+    </div>
+
+    <div class="params-section">
+      <div class="params-header"><h3>Filter</h3></div>
+      <div class="params-grid" id="sub-params-grid"></div>
+    </div>
+
+    <div class="params-section">
+      <div class="params-header"><h3>Amp Envelope</h3></div>
+      <div class="adsr-values" id="amp-adsr-values"></div>
+      <canvas id="adsr-amp" class="adsr-canvas" width="380" height="120"></canvas>
+    </div>
+
+    <div class="params-section">
+      <div class="params-header"><h3>Filter Envelope</h3></div>
+      <div class="adsr-values" id="filt-adsr-values"></div>
+      <canvas id="adsr-filt" class="adsr-canvas" width="380" height="120"></canvas>
+    </div>
+
+    <div class="keyboard-section">
+      <h3>Keyboard</h3>
+      <div class="note-display" id="note-display">&nbsp;</div>
+      <div class="keyboard" id="keyboard"></div>
+    </div>
+
+    <div class="detail-volume">
+      <label>Vol</label>
+      <input type="range" id="detail-vol" min="0" max="1" step="0.01" value="${cs.volume || 1}">
+      <span class="val" id="detail-vol-val">${(cs.volume || 1).toFixed(2)}</span>
+    </div>
+  `;
+
+  // Waveform buttons
+  const waveRow = document.getElementById('wave-row');
+  SUB_WAVE_NAMES.forEach((name, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'family-btn' + (cs.waveform === i ? ' active' : '');
+    btn.textContent = name;
+    btn.addEventListener('click', () => {
+      send({ type: 'ch', channel: ch, path: '/param/waveform', iargs: [i] });
+    });
+    waveRow.appendChild(btn);
+  });
+
+  // Knob-style sliders (cutoff is log, others linear)
+  renderSubKnobs(ch, cs);
+
+  // ADSR canvases
+  setupADSR('adsr-amp', 'amp-adsr-values', ch, 'amp_attack', 'amp_decay', 'amp_sustain', 'amp_release', params);
+  setupADSR('adsr-filt', 'filt-adsr-values', ch, 'filt_attack', 'filt_decay', 'filt_sustain', 'filt_release', params);
+
+  // Reset
+  document.getElementById('sub-reset-btn').addEventListener('click', () => {
+    send({ type: 'ch', channel: ch, path: '/param/reset' });
+  });
+
+  // Volume
+  document.getElementById('detail-vol').addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('detail-vol-val').textContent = val.toFixed(2);
+    send({ type: 'ch', channel: ch, path: '/volume', fargs: [val] });
+  });
+
+  renderKeyboard(ch);
+}
+
+function renderSubKnobs(ch, cs) {
+  const grid = document.getElementById('sub-params-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const params = cs.params || {};
+
+  SUB_KNOB_DEFS.forEach(p => {
+    const val = params[p.key] !== undefined ? params[p.key] : p.min;
+    const div = document.createElement('div');
+    div.className = 'param-control';
+
+    if (p.log) {
+      // Logarithmic slider (cutoff)
+      const sliderVal = cutoffToSlider(val);
+      div.innerHTML = `
+        <div class="param-label">
+          <span class="name">${p.label}</span>
+          <span class="val" id="pval-${p.key}">${p.display(val)}</span>
+        </div>
+        <input type="range" class="param-slider" id="pslider-${p.key}"
+          min="0" max="1" step="0.001" value="${sliderVal}">
+      `;
+      grid.appendChild(div);
+      const slider = div.querySelector(`#pslider-${p.key}`);
+      slider.addEventListener('input', (e) => {
+        const hz = sliderToCutoff(parseFloat(e.target.value));
+        div.querySelector(`#pval-${p.key}`).textContent = p.display(hz);
+        send({ type: 'ch', channel: ch, path: `/param/${p.key}`, fargs: [hz] });
+      });
+    } else {
+      // Linear slider
+      div.innerHTML = `
+        <div class="param-label">
+          <span class="name">${p.label}</span>
+          <span class="val" id="pval-${p.key}">${p.display(val)}</span>
+        </div>
+        <input type="range" class="param-slider" id="pslider-${p.key}"
+          min="${p.min}" max="${p.max}" step="${p.step}" value="${val}">
+      `;
+      grid.appendChild(div);
+      const slider = div.querySelector(`#pslider-${p.key}`);
+      slider.addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        div.querySelector(`#pval-${p.key}`).textContent = p.display(v);
+        send({ type: 'ch', channel: ch, path: `/param/${p.key}`, fargs: [v] });
+      });
+    }
+  });
+}
+
+/* ── ADSR Canvas Editor ──────────────────────────────────────────
+ *
+ * 4 draggable nodes on a canvas:
+ *   node 0: start (fixed at x=0, y=bottom)
+ *   node 1: attack peak (x = attack time, y = top)
+ *   node 2: decay end / sustain (x = attack+decay, y = sustain level)
+ *   node 3: release end (x = attack+decay+release, y = bottom)
+ *
+ * Horizontal = time (log scale 1ms-5s per segment)
+ * Vertical   = level (0 bottom, 1 top)
+ */
+
+function setupADSR(canvasId, valuesId, ch, atkKey, decKey, susKey, relKey, params) {
+  const canvas = document.getElementById(canvasId);
+  const valuesEl = document.getElementById(valuesId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = 12;
+  const nodeR = 7;
+
+  // Segment width allocation: each time param gets 1/3 of width
+  const segW = (W - pad * 2) / 3;
+
+  let atk = params[atkKey] || 0.005;
+  let dec = params[decKey] || 0.2;
+  let sus = params[susKey] !== undefined ? params[susKey] : 0.8;
+  let rel = params[relKey] || 0.3;
+
+  function timeToX(t, seg) { return pad + seg * segW + timeToSlider(t) * segW; }
+  function levelToY(l) { return pad + (1 - l) * (H - pad * 2); }
+
+  function getNodes() {
+    return [
+      { x: pad, y: levelToY(0) },                                       // start
+      { x: pad + timeToSlider(atk) * segW, y: levelToY(1) },           // attack peak
+      { x: pad + segW + timeToSlider(dec) * segW, y: levelToY(sus) },  // sustain
+      { x: pad + 2 * segW + timeToSlider(rel) * segW, y: levelToY(0) } // release end
+    ];
+  }
+
+  function updateValues() {
+    if (!valuesEl) return;
+    valuesEl.innerHTML =
+      `<span>A: ${fmtTime(atk)}</span>` +
+      `<span>D: ${fmtTime(dec)}</span>` +
+      `<span>S: ${sus.toFixed(2)}</span>` +
+      `<span>R: ${fmtTime(rel)}</span>`;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Grid lines
+    ctx.strokeStyle = '#1a1a2e';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad + i * (H - pad * 2) / 4;
+      ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W - pad, y); ctx.stroke();
+    }
+    // Segment dividers
+    ctx.strokeStyle = '#2a2a4a';
+    for (let i = 1; i <= 2; i++) {
+      const x = pad + i * segW;
+      ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, H - pad); ctx.stroke();
+    }
+
+    // Segment labels
+    ctx.fillStyle = '#444';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('ATK', pad + segW / 2, H - 1);
+    ctx.fillText('DEC', pad + segW * 1.5, H - 1);
+    ctx.fillText('REL', pad + segW * 2.5, H - 1);
+
+    const nodes = getNodes();
+
+    // Envelope path
+    ctx.beginPath();
+    ctx.moveTo(nodes[0].x, nodes[0].y);
+    ctx.lineTo(nodes[1].x, nodes[1].y);
+    ctx.lineTo(nodes[2].x, nodes[2].y);
+    ctx.lineTo(nodes[3].x, nodes[3].y);
+    ctx.strokeStyle = '#e94560';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Fill under curve
+    ctx.lineTo(nodes[3].x, levelToY(0));
+    ctx.lineTo(nodes[0].x, levelToY(0));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(233, 69, 96, 0.1)';
+    ctx.fill();
+
+    // Sustain dashed line
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#e9456060';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(nodes[2].x, nodes[2].y);
+    ctx.lineTo(W - pad, nodes[2].y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Nodes
+    nodes.forEach((n, i) => {
+      if (i === 0) return; // start node not draggable
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, nodeR, 0, Math.PI * 2);
+      ctx.fillStyle = '#e94560';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    });
+
+    updateValues();
+  }
+
+  // Drag handling
+  let dragNode = -1;
+
+  function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  }
+
+  function findNode(pos) {
+    const nodes = getNodes();
+    for (let i = 1; i <= 3; i++) { // skip node 0
+      const dx = pos.x - nodes[i].x, dy = pos.y - nodes[i].y;
+      if (dx * dx + dy * dy < (nodeR + 4) * (nodeR + 4)) return i;
+    }
+    return -1;
+  }
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function onDown(e) {
+    e.preventDefault();
+    const pos = getMousePos(e);
+    dragNode = findNode(pos);
+    if (dragNode >= 0) canvas.style.cursor = 'grabbing';
+  }
+
+  function onMove(e) {
+    if (dragNode < 0) {
+      // Hover cursor
+      const pos = getMousePos(e);
+      canvas.style.cursor = findNode(pos) >= 0 ? 'grab' : 'default';
+      return;
+    }
+    e.preventDefault();
+    const pos = getMousePos(e);
+
+    if (dragNode === 1) {
+      // Attack: x controls time, y is always 1.0
+      const t = clamp((pos.x - pad) / segW, 0, 1);
+      atk = sliderToTime(t);
+      send({ type: 'ch', channel: ch, path: `/param/${atkKey}`, fargs: [atk] });
+    } else if (dragNode === 2) {
+      // Decay + Sustain: x in segment 1 = decay time, y = sustain level
+      const t = clamp((pos.x - pad - segW) / segW, 0, 1);
+      dec = sliderToTime(t);
+      sus = clamp(1 - (pos.y - pad) / (H - pad * 2), 0, 1);
+      send({ type: 'ch', channel: ch, path: `/param/${decKey}`, fargs: [dec] });
+      send({ type: 'ch', channel: ch, path: `/param/${susKey}`, fargs: [sus] });
+    } else if (dragNode === 3) {
+      // Release: x in segment 2, y locked to 0
+      const t = clamp((pos.x - pad - 2 * segW) / segW, 0, 1);
+      rel = sliderToTime(t);
+      send({ type: 'ch', channel: ch, path: `/param/${relKey}`, fargs: [rel] });
+    }
+
+    draw();
+  }
+
+  function onUp() {
+    dragNode = -1;
+    canvas.style.cursor = 'default';
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+
+  // Store update function for live server updates
+  canvas._adsrUpdate = function(p) {
+    if (dragNode >= 0) return; // don't fight user dragging
+    if (p[atkKey] !== undefined) atk = p[atkKey];
+    if (p[decKey] !== undefined) dec = p[decKey];
+    if (p[susKey] !== undefined) sus = p[susKey];
+    if (p[relKey] !== undefined) rel = p[relKey];
+    draw();
+  };
+
+  draw();
 }
 
 // ── YM2413 OPLL Detail Pane ──────────────────────────────────────
@@ -1358,17 +1747,37 @@ function updateDetail() {
 
   // Params — only update if slider not being dragged
   if (cs.params) {
-    PARAM_DEFS.forEach(p => {
+    const defs = (slot.type === 'sub-synth') ? SUB_KNOB_DEFS : PARAM_DEFS;
+    defs.forEach(p => {
       const slider = document.getElementById(`pslider-${p.key}`);
       const valEl = document.getElementById(`pval-${p.key}`);
       if (slider && document.activeElement !== slider) {
         const v = cs.params[p.key];
         if (v !== undefined) {
-          slider.value = v;
-          if (valEl) valEl.textContent = v.toFixed(3);
+          // Log cutoff: convert Hz to slider position
+          slider.value = p.log ? cutoffToSlider(v) : v;
+          if (valEl) valEl.textContent = p.display ? p.display(v) : v.toFixed(3);
         }
       }
     });
+
+    // Update ADSR canvases
+    if (slot.type === 'sub-synth') {
+      const ampCanvas = document.getElementById('adsr-amp');
+      if (ampCanvas && ampCanvas._adsrUpdate) ampCanvas._adsrUpdate(cs.params);
+      const filtCanvas = document.getElementById('adsr-filt');
+      if (filtCanvas && filtCanvas._adsrUpdate) filtCanvas._adsrUpdate(cs.params);
+    }
+  }
+
+  // Sub-synth waveform buttons
+  if (slot.type === 'sub-synth') {
+    const waveRow = document.getElementById('wave-row');
+    if (waveRow && cs.waveform !== undefined) {
+      Array.from(waveRow.children).forEach((btn, i) => {
+        btn.classList.toggle('active', cs.waveform === i);
+      });
+    }
   }
 
   // Presets highlight
