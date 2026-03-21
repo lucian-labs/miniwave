@@ -160,6 +160,7 @@ static void fm_note_off(FMSynth *s, int note) {
 /* ── InstrumentType interface ───────────────────────────────────────── */
 
 static void fm_synth_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2);
+static void fm_synth_set_param(void *state, const char *name, float value);
 static void fm_synth_osc_handle(void *state, const char *sub_path,
                                 const int32_t *iargs, int ni,
                                 const float *fargs, int nf);
@@ -399,26 +400,9 @@ static void fm_synth_osc_handle(void *state, const char *sub_path,
     else if (strncmp(sub_path, "/param/", 7) == 0) {
         const char *param = sub_path + 7;
         if (strcmp(param, "reset") == 0) {
-            s->live_params.override = 0;
-            fprintf(stderr, "[fm-synth] OSC param override disabled\n");
-        }
-        else if (nf >= 1) {
-            float val = fargs[0];
-            int matched = 1;
-            if      (strcmp(param, "carrier_ratio") == 0) s->live_params.carrier_ratio = val;
-            else if (strcmp(param, "mod_ratio")     == 0) s->live_params.mod_ratio     = val;
-            else if (strcmp(param, "mod_index")     == 0) s->live_params.mod_index     = val;
-            else if (strcmp(param, "attack")        == 0) s->live_params.attack         = val;
-            else if (strcmp(param, "decay")         == 0) s->live_params.decay          = val;
-            else if (strcmp(param, "sustain")       == 0) s->live_params.sustain        = val;
-            else if (strcmp(param, "release")       == 0) s->live_params.release        = val;
-            else if (strcmp(param, "feedback")      == 0) s->live_params.feedback       = val;
-            else matched = 0;
-
-            if (matched) {
-                s->live_params.override = 1;
-                fprintf(stderr, "[fm-synth] OSC param %s = %.4f (override on)\n", param, val);
-            }
+            fm_synth_set_param(state, "reset", 0);
+        } else if (nf >= 1) {
+            fm_synth_set_param(state, param, fargs[0]);
         }
     }
     else if (strcmp(sub_path, "/preset/load") == 0 && ni >= 1) {
@@ -505,6 +489,34 @@ static int fm_synth_osc_status(void *state, uint8_t *buf, int max_len) {
     return pos;
 }
 
+/* ── set_param — named parameter setter ────────────────────────────── */
+
+static void fm_synth_set_param(void *state, const char *name, float value) {
+    FMSynth *s = (FMSynth *)state;
+
+    if (strcmp(name, "reset") == 0) {
+        s->live_params.override = 0;
+        fprintf(stderr, "[fm-synth] param override disabled\n");
+        return;
+    }
+
+    int matched = 1;
+    if      (strcmp(name, "carrier_ratio") == 0) s->live_params.carrier_ratio = value;
+    else if (strcmp(name, "mod_ratio")     == 0) s->live_params.mod_ratio     = value;
+    else if (strcmp(name, "mod_index")     == 0) s->live_params.mod_index     = value;
+    else if (strcmp(name, "attack")        == 0) s->live_params.attack        = value;
+    else if (strcmp(name, "decay")         == 0) s->live_params.decay         = value;
+    else if (strcmp(name, "sustain")       == 0) s->live_params.sustain       = value;
+    else if (strcmp(name, "release")       == 0) s->live_params.release       = value;
+    else if (strcmp(name, "feedback")      == 0) s->live_params.feedback      = value;
+    else matched = 0;
+
+    if (matched) {
+        s->live_params.override = 1;
+        fprintf(stderr, "[fm-synth] param %s = %.4f (override on)\n", name, value);
+    }
+}
+
 /* ── Exported type descriptor ───────────────────────────────────────── */
 
 InstrumentType fm_synth_type = {
@@ -515,6 +527,7 @@ InstrumentType fm_synth_type = {
     .destroy      = fm_synth_destroy,
     .midi         = fm_synth_midi,
     .render       = fm_synth_render,
+    .set_param    = fm_synth_set_param,
     .osc_handle   = fm_synth_osc_handle,
     .osc_status   = fm_synth_osc_status,
 };

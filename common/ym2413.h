@@ -2181,6 +2181,37 @@ static int ym2413_osc_status(void *state, uint8_t *buf, int max_len) {
     return pos;
 }
 
+/* ── set_param — named parameter setter ───────────────────────────────── */
+
+static void ym2413_set_param(void *state, const char *name, float value) {
+    YM2413State *s = (YM2413State *)state;
+
+    if      (strcmp(name, "instrument") == 0) {
+        int inst = (int)value;
+        if (inst >= 0 && inst <= 15) s->current_instrument = inst;
+    }
+    else if (strcmp(name, "rhythm")     == 0) s->rhythm_mode = (int)value ? 1 : 0;
+    else if (strcmp(name, "volume")     == 0) {
+        s->volume = value;
+        if (s->volume < 0.0f) s->volume = 0.0f;
+        if (s->volume > 1.0f) s->volume = 1.0f;
+    }
+    else if (strcmp(name, "mono")       == 0) s->mono_mode = (int)value ? 1 : 0;
+    else if (strcmp(name, "portamento") == 0) s->porta_on = (int)value ? 1 : 0;
+    else if (strcmp(name, "porta_time") == 0) s->porta_time = value;
+    else if (strcmp(name, "pitchbend")  == 0) s->pitch_bend = value;
+    else if (strcmp(name, "modwheel")   == 0) {
+        s->mod_wheel = value;
+        if (s->mod_wheel < 0.0f) s->mod_wheel = 0.0f;
+        if (s->mod_wheel > 1.0f) s->mod_wheel = 1.0f;
+    }
+    else if (strcmp(name, "modtarget")  == 0) s->mod_target = (int)value % 3;
+    else if (strcmp(name, "drum_bank")  == 0) {
+        int bank = (int)value;
+        if (bank >= 0 && bank < OPLL_NUM_DRUM_BANKS) s->drum_bank = bank;
+    }
+}
+
 /* ── Exported type descriptor ─────────────────────────────────────────── */
 
 InstrumentType ym2413_type = {
@@ -2191,6 +2222,7 @@ InstrumentType ym2413_type = {
     .destroy      = ym2413_destroy,
     .midi         = ym2413_midi,
     .render       = ym2413_render,
+    .set_param    = ym2413_set_param,
     .osc_handle   = ym2413_osc_handle,
     .osc_status   = ym2413_osc_status,
 };

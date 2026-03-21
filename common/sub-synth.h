@@ -316,6 +316,7 @@ static void sub_note_off(SubSynth *s, int note) {
 /* ── InstrumentType interface ─────────────────────────────────────────── */
 
 static void sub_synth_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2);
+static void sub_synth_set_param(void *state, const char *name, float value);
 static void sub_synth_osc_handle(void *state, const char *sub_path,
                                   const int32_t *iargs, int ni,
                                   const float *fargs, int nf);
@@ -518,26 +519,11 @@ static void sub_synth_osc_handle(void *state, const char *sub_path,
     else if (strncmp(sub_path, "/param/", 7) == 0) {
         const char *param = sub_path + 7;
         if (strcmp(param, "reset") == 0) {
-            sub_synth_init(state);
-        }
-        else if (nf >= 1) {
-            float val = fargs[0];
-            if      (strcmp(param, "waveform")         == 0) s->params.waveform = (int)val % SUB_WAVE_COUNT;
-            else if (strcmp(param, "pulse_width")       == 0) s->params.pulse_width = val;
-            else if (strcmp(param, "filter_cutoff")     == 0) s->params.filter_cutoff = val;
-            else if (strcmp(param, "filter_reso")       == 0) s->params.filter_reso = val;
-            else if (strcmp(param, "filter_env_depth")  == 0) s->params.filter_env_depth = val;
-            else if (strcmp(param, "filt_attack")       == 0) s->params.filt_attack = val;
-            else if (strcmp(param, "filt_decay")        == 0) s->params.filt_decay = val;
-            else if (strcmp(param, "filt_sustain")      == 0) s->params.filt_sustain = val;
-            else if (strcmp(param, "filt_release")      == 0) s->params.filt_release = val;
-            else if (strcmp(param, "amp_attack")        == 0) s->params.amp_attack = val;
-            else if (strcmp(param, "amp_decay")         == 0) s->params.amp_decay = val;
-            else if (strcmp(param, "amp_sustain")       == 0) s->params.amp_sustain = val;
-            else if (strcmp(param, "amp_release")       == 0) s->params.amp_release = val;
-        }
-        else if (ni >= 1) {
-            if (strcmp(param, "waveform") == 0) s->params.waveform = iargs[0] % SUB_WAVE_COUNT;
+            sub_synth_set_param(state, "reset", 0);
+        } else if (nf >= 1) {
+            sub_synth_set_param(state, param, fargs[0]);
+        } else if (ni >= 1) {
+            sub_synth_set_param(state, param, (float)iargs[0]);
         }
     }
     else {
@@ -596,6 +582,31 @@ static int sub_synth_osc_status(void *state, uint8_t *buf, int max_len) {
     return pos;
 }
 
+/* ── set_param — named parameter setter ───────────────────────────────── */
+
+static void sub_synth_set_param(void *state, const char *name, float value) {
+    SubSynth *s = (SubSynth *)state;
+
+    if (strcmp(name, "reset") == 0) {
+        sub_synth_init(state);
+        return;
+    }
+
+    if      (strcmp(name, "waveform")         == 0) s->params.waveform = (int)value % SUB_WAVE_COUNT;
+    else if (strcmp(name, "pulse_width")       == 0) s->params.pulse_width = value;
+    else if (strcmp(name, "filter_cutoff")     == 0) s->params.filter_cutoff = value;
+    else if (strcmp(name, "filter_reso")       == 0) s->params.filter_reso = value;
+    else if (strcmp(name, "filter_env_depth")  == 0) s->params.filter_env_depth = value;
+    else if (strcmp(name, "filt_attack")       == 0) s->params.filt_attack = value;
+    else if (strcmp(name, "filt_decay")        == 0) s->params.filt_decay = value;
+    else if (strcmp(name, "filt_sustain")      == 0) s->params.filt_sustain = value;
+    else if (strcmp(name, "filt_release")      == 0) s->params.filt_release = value;
+    else if (strcmp(name, "amp_attack")        == 0) s->params.amp_attack = value;
+    else if (strcmp(name, "amp_decay")         == 0) s->params.amp_decay = value;
+    else if (strcmp(name, "amp_sustain")       == 0) s->params.amp_sustain = value;
+    else if (strcmp(name, "amp_release")       == 0) s->params.amp_release = value;
+}
+
 /* ── Exported type descriptor ─────────────────────────────────────────── */
 
 InstrumentType sub_synth_type = {
@@ -606,6 +617,7 @@ InstrumentType sub_synth_type = {
     .destroy      = sub_synth_destroy,
     .midi         = sub_synth_midi,
     .render       = sub_synth_render,
+    .set_param    = sub_synth_set_param,
     .osc_handle   = sub_synth_osc_handle,
     .osc_status   = sub_synth_osc_status,
 };

@@ -158,6 +158,7 @@ static void fmd_ensure_note(FMDrumState *s, int note) {
 /* ── InstrumentType interface ─────────────────────────────────────── */
 
 static void fmd_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2);
+static void fmd_set_param(void *state, const char *name, float value);
 static void fmd_osc_handle(void *state, const char *sub_path,
                             const int32_t *iargs, int ni,
                             const float *fargs, int nf);
@@ -339,21 +340,7 @@ static void fmd_osc_handle(void *state, const char *sub_path,
         }
     }
     else if (strncmp(sub_path, "/param/", 7) == 0 && nf >= 1) {
-        int note = s->editing_note;
-        if (note < 0 || note >= FMD_NUM_NOTES) return;
-        FMDrumDef *d = &s->notes[note].def;
-        const char *param = sub_path + 7;
-        float val = fargs[0];
-
-        if      (strcmp(param, "carrier_freq") == 0) d->carrier_freq = val;
-        else if (strcmp(param, "mod_freq")     == 0) d->mod_freq     = val;
-        else if (strcmp(param, "mod_index")    == 0) d->mod_index    = val;
-        else if (strcmp(param, "pitch_sweep")  == 0) d->pitch_sweep  = val;
-        else if (strcmp(param, "pitch_decay")  == 0) d->pitch_decay  = val;
-        else if (strcmp(param, "decay")        == 0) d->decay        = val;
-        else if (strcmp(param, "noise_amt")    == 0) d->noise_amt    = val;
-        else if (strcmp(param, "click_amt")    == 0) d->click_amt    = val;
-        else if (strcmp(param, "feedback")     == 0) d->feedback     = val;
+        fmd_set_param(state, sub_path + 7, fargs[0]);
     }
     else {
         seq_osc_handle(&s->seq, sub_path, iargs, ni, fargs, nf);
@@ -363,6 +350,25 @@ static void fmd_osc_handle(void *state, const char *sub_path,
 static int fmd_osc_status(void *state, uint8_t *buf, int max_len) {
     (void)state; (void)buf; (void)max_len;
     return 0;
+}
+
+/* ── set_param — named parameter setter ───────────────────────────── */
+
+static void fmd_set_param(void *state, const char *name, float value) {
+    FMDrumState *s = (FMDrumState *)state;
+    int note = s->editing_note;
+    if (note < 0 || note >= FMD_NUM_NOTES) return;
+    FMDrumDef *d = &s->notes[note].def;
+
+    if      (strcmp(name, "carrier_freq") == 0) d->carrier_freq = value;
+    else if (strcmp(name, "mod_freq")     == 0) d->mod_freq     = value;
+    else if (strcmp(name, "mod_index")    == 0) d->mod_index    = value;
+    else if (strcmp(name, "pitch_sweep")  == 0) d->pitch_sweep  = value;
+    else if (strcmp(name, "pitch_decay")  == 0) d->pitch_decay  = value;
+    else if (strcmp(name, "decay")        == 0) d->decay        = value;
+    else if (strcmp(name, "noise_amt")    == 0) d->noise_amt    = value;
+    else if (strcmp(name, "click_amt")    == 0) d->click_amt    = value;
+    else if (strcmp(name, "feedback")     == 0) d->feedback     = value;
 }
 
 /* ── Exported type descriptor ─────────────────────────────────────── */
@@ -375,6 +381,7 @@ InstrumentType fm_drums_type = {
     .destroy      = fmd_destroy,
     .midi         = fmd_midi,
     .render       = fmd_render,
+    .set_param    = fmd_set_param,
     .osc_handle   = fmd_osc_handle,
     .osc_status   = fmd_osc_status,
 };
