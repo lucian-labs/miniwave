@@ -364,7 +364,24 @@ static int fmd_json_status(void *state, char *buf, int max) {
 
 static int fmd_json_save(void *state, char *buf, int max) {
     FMDrumState *ds = (FMDrumState *)state;
+    int en = ds->editing_note;
+    if (en < 0 || en >= FMD_NUM_NOTES) en = 36;
+    const FMDrumDef *ed = &ds->notes[en].def;
+
     int pos = 0;
+    /* Flat params for current editing note — frontend renders these */
+    pos += snprintf(buf + pos, (size_t)(max - pos),
+        "\"volume\":%.4f,\"editing_note\":%d,"
+        "\"carrier_freq\":%.4f,\"mod_freq\":%.4f,\"mod_index\":%.4f,"
+        "\"pitch_sweep\":%.4f,\"pitch_decay\":%.5f,"
+        "\"decay\":%.4f,\"noise_amt\":%.4f,"
+        "\"click_amt\":%.4f,\"feedback\":%.4f,",
+        (double)ds->volume, en,
+        (double)ed->carrier_freq, (double)ed->mod_freq, (double)ed->mod_index,
+        (double)ed->pitch_sweep, (double)ed->pitch_decay,
+        (double)ed->decay, (double)ed->noise_amt,
+        (double)ed->click_amt, (double)ed->feedback);
+    /* Full per-note data for persistence */
     pos += snprintf(buf + pos, (size_t)(max - pos), "\"notes\":{");
     int first = 1;
     for (int ni = 0; ni < FMD_NUM_NOTES; ni++) {

@@ -591,13 +591,15 @@ static int sub_synth_json_status(void *state, char *buf, int max) {
 static int sub_synth_json_save(void *state, char *buf, int max) {
     SubSynth *s = (SubSynth *)state;
     return snprintf(buf, (size_t)max,
-        "\"params\":{\"waveform\":%d,\"pulse_width\":%.4f,"
+        "\"volume\":%.4f,"
+        "\"waveform\":%d,\"pulse_width\":%.4f,"
         "\"filter_cutoff\":%.4f,\"filter_reso\":%.4f,"
         "\"filter_env_depth\":%.4f,"
         "\"filt_attack\":%.4f,\"filt_decay\":%.4f,"
         "\"filt_sustain\":%.4f,\"filt_release\":%.4f,"
         "\"amp_attack\":%.4f,\"amp_decay\":%.4f,"
-        "\"amp_sustain\":%.4f,\"amp_release\":%.4f}",
+        "\"amp_sustain\":%.4f,\"amp_release\":%.4f",
+        (double)s->volume,
         s->params.waveform,
         (double)s->params.pulse_width,
         (double)s->params.filter_cutoff,

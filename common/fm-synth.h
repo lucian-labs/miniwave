@@ -516,25 +516,30 @@ static int fm_synth_json_status(void *state, char *buf, int max) {
 
 static int fm_synth_json_save(void *state, char *buf, int max) {
     FMSynth *s = (FMSynth *)state;
-    int pos = 0;
-    pos += snprintf(buf + pos, (size_t)(max - pos),
-        "\"preset\":%d,\"override\":%d",
-        s->current_preset, s->live_params.override);
+
+    /* Always emit active param values (preset or override) */
+    float p[8];
     if (s->live_params.override) {
-        pos += snprintf(buf + pos, (size_t)(max - pos),
-            ",\"params\":{\"carrier_ratio\":%.4f,\"mod_ratio\":%.4f,"
-            "\"mod_index\":%.4f,\"attack\":%.4f,\"decay\":%.4f,"
-            "\"sustain\":%.4f,\"release\":%.4f,\"feedback\":%.4f}",
-            (double)s->live_params.carrier_ratio,
-            (double)s->live_params.mod_ratio,
-            (double)s->live_params.mod_index,
-            (double)s->live_params.attack,
-            (double)s->live_params.decay,
-            (double)s->live_params.sustain,
-            (double)s->live_params.release,
-            (double)s->live_params.feedback);
+        p[0]=s->live_params.carrier_ratio; p[1]=s->live_params.mod_ratio;
+        p[2]=s->live_params.mod_index; p[3]=s->live_params.attack;
+        p[4]=s->live_params.decay; p[5]=s->live_params.sustain;
+        p[6]=s->live_params.release; p[7]=s->live_params.feedback;
+    } else {
+        const FMPreset *pr = &PRESETS[s->current_preset];
+        p[0]=pr->carrier_ratio; p[1]=pr->mod_ratio; p[2]=pr->mod_index;
+        p[3]=pr->attack; p[4]=pr->decay; p[5]=pr->sustain;
+        p[6]=pr->release; p[7]=pr->feedback;
     }
-    return pos;
+
+    return snprintf(buf, (size_t)max,
+        "\"preset\":%d,\"override\":%d,\"volume\":%.4f,"
+        "\"carrier_ratio\":%.4f,\"mod_ratio\":%.4f,\"mod_index\":%.4f,"
+        "\"attack\":%.4f,\"decay\":%.4f,\"sustain\":%.4f,"
+        "\"release\":%.4f,\"feedback\":%.4f",
+        s->current_preset, s->live_params.override, (double)s->volume,
+        (double)p[0], (double)p[1], (double)p[2],
+        (double)p[3], (double)p[4], (double)p[5],
+        (double)p[6], (double)p[7]);
 }
 
 static int fm_synth_json_load(void *state, const char *json) {

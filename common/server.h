@@ -872,46 +872,13 @@ static void http_handle_api(int fd, const char *body) {
                 pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
                     ",\"channel\":%d,\"active_instrument\":\"%s\"", ch, tname);
 
-                /* Current param values */
-                pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), ",\"current_values\":[");
-                if (strcmp(tname, "fm-synth") == 0) {
-                    FMSynth *s = (FMSynth *)slot->state;
-                    float *lp = &s->live_params.carrier_ratio;
-                    const char *names[] = {"carrier_ratio","mod_ratio","mod_index","attack","decay","sustain","release","feedback"};
-                    for (int p = 0; p < 8; p++)
-                        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
-                            "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)lp[p]);
-                } else if (strcmp(tname, "sub-synth") == 0) {
-                    SubSynth *s = (SubSynth *)slot->state;
-                    float vals[] = {(float)s->params.waveform, s->params.pulse_width,
-                        s->params.filter_cutoff, s->params.filter_reso, s->params.filter_env_depth,
-                        s->params.filt_attack, s->params.filt_decay, s->params.filt_sustain, s->params.filt_release,
-                        s->params.amp_attack, s->params.amp_decay, s->params.amp_sustain, s->params.amp_release};
-                    const char *names[] = {"waveform","pulse_width","filter_cutoff","filter_reso","filter_env_depth",
-                        "filt_attack","filt_decay","filt_sustain","filt_release",
-                        "amp_attack","amp_decay","amp_sustain","amp_release"};
-                    for (int p = 0; p < 13; p++)
-                        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
-                            "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)vals[p]);
-                } else if (strcmp(tname, "fm-drums") == 0) {
-                    FMDrumState *ds = (FMDrumState *)slot->state;
-                    int en = ds->editing_note; if (en < 0 || en >= FMD_NUM_NOTES) en = 36;
-                    const FMDrumDef *d = &ds->notes[en].def;
-                    float vals[] = {d->carrier_freq, d->mod_freq, d->mod_index, d->pitch_sweep,
-                        d->pitch_decay, d->decay, d->noise_amt, d->click_amt, d->feedback};
-                    const char *names[] = {"carrier_freq","mod_freq","mod_index","pitch_sweep",
-                        "pitch_decay","decay","noise_amt","click_amt","feedback"};
-                    for (int p = 0; p < 9; p++)
-                        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
-                            "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)vals[p]);
-                } else if (strcmp(tname, "ym2413") == 0) {
-                    YM2413State *y = (YM2413State *)slot->state;
-                    pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
-                        "{\"name\":\"instrument\",\"value\":%d},{\"name\":\"volume\",\"value\":%.4f},"
-                        "{\"name\":\"rhythm\",\"value\":%d}",
-                        y->current_instrument, (double)y->volume, y->rhythm_mode);
+                /* Current param values — use json_save (instrument-agnostic) */
+                InstrumentType *itype = g_type_registry[slot->type_idx];
+                if (itype->json_save) {
+                    char vbuf[4096];
+                    int vn = itype->json_save(slot->state, vbuf, (int)sizeof(vbuf));
+                    if (vn > 0) pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), ",%s", vbuf);
                 }
-                pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), "]");
 
                 /* KeySeq state */
                 KeySeq *ks = slot->keyseq;
