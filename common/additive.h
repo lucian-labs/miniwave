@@ -25,6 +25,24 @@
 
 #include "instruments.h"
 #include <math.h>
+
+/* json_escape may not be defined yet (additive.h included before rack.h) */
+#ifndef JSON_ESCAPE_DEFINED
+#define JSON_ESCAPE_DEFINED
+static int json_escape(char *dst, int max, const char *src) {
+    int j = 0;
+    for (int i = 0; src[i] && j < max - 2; i++) {
+        char c = src[i];
+        if (c == '"' || c == '\\') { if (j+2>=max) break; dst[j++]='\\'; dst[j++]=c; }
+        else if (c == '\n') { if (j+2>=max) break; dst[j++]='\\'; dst[j++]='n'; }
+        else if (c == '\r') { if (j+2>=max) break; dst[j++]='\\'; dst[j++]='r'; }
+        else if ((unsigned char)c < 0x20) continue;
+        else dst[j++] = c;
+    }
+    dst[j] = '\0';
+    return j;
+}
+#endif
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,7 +60,15 @@
 
 /* ── Modes ────────────────────────────────────────────────────────────── */
 
-enum { ADD_MODE_HARMONIC = 0, ADD_MODE_PARTIAL = 1, ADD_MODE_CLUSTER = 2 };
+enum {
+    ADD_MODE_HARMONIC = 0,  /* integer multiples, classic additive */
+    ADD_MODE_CLUSTER  = 1,  /* ratio-based exponential spacing */
+    ADD_MODE_FORMANT  = 2,  /* resonant peaks at formant frequencies */
+    ADD_MODE_METALLIC = 3,  /* inharmonic ratios (bells, gongs) */
+    ADD_MODE_NOISE    = 4,  /* noise-shaped spectrum */
+    ADD_MODE_EXPR     = 5,  /* fully expression-driven amp + freq */
+    ADD_MODE_COUNT
+};
 
 /* ── Voice ────────────────────────────────────────────────────────────── */
 
@@ -77,11 +103,25 @@ typedef struct {
     float harm_amps[ADD_MAX_HARMONICS];   /* amplitude per harmonic */
     float harm_phases[ADD_MAX_HARMONICS]; /* phase offset per harmonic */
 
-    /* Cluster mode params */
-    float cluster_fundamental;  /* base freq (overridden by MIDI note) */
+    /* Shared mode params */
     float cluster_ratio;        /* frequency ratio between partials */
     float cluster_spread;       /* detuning/noise amount */
     float cluster_rolloff;      /* amplitude rolloff per partial */
+
+    /* Formant mode */
+    float formant_center;       /* center freq in Hz */
+    float formant_width;        /* bandwidth in Hz */
+
+    /* Metallic mode */
+    float metal_inharmonicity;  /* 0=harmonic, 1=maximally inharmonic */
+
+    /* Expression mode — compiled expressions for amp(h) and freq(h) */
+    KeySeqExpr amp_expr;        /* amplitude expression, var h = harmonic index */
+    KeySeqExpr freq_expr;       /* freq multiplier expression, var h */
+    KeySeqExpr phase_expr;      /* phase offset expression, var h */
+    char amp_expr_src[256];
+    char freq_expr_src[256];
+    char phase_expr_src[256];
 
     /* Envelope */
     float attack, decay, sustain, release;
@@ -97,43 +137,94 @@ typedef struct {
 /* ── Wavetable generation ─────────────────────────────────────────────── */
 
 static void additive_build_table(AdditiveState *s) {
-    static const char *mode_names[] = {"harmonic", "partial", "cluster"};
-    fprintf(stderr, "[additive] build_table: mode=%s harmonics=%d ratio=%.2f spread=%.2f rolloff=%.2f\n",
-            mode_names[s->mode], s->num_harmonics,
-            (double)s->cluster_ratio, (double)s->cluster_spread, (double)s->cluster_rolloff);
+    static const char *mode_names[] = {"harmonic","cluster","formant","metallic","noise","expr"};
+    fprintf(stderr, "[additive] build_table: mode=%s harmonics=%d\n",
+            s->mode < ADD_MODE_COUNT ? mode_names[s->mode] : "?", s->num_harmonics);
     memset(s->table, 0, sizeof(s->table));
 
-    if (s->mode == ADD_MODE_HARMONIC || s->mode == ADD_MODE_CLUSTER) {
-        int nh = s->num_harmonics;
-        if (nh < 1) nh = 1;
-        if (nh > ADD_MAX_HARMONICS) nh = ADD_MAX_HARMONICS;
+    int nh = s->num_harmonics;
+    if (nh < 1) nh = 1;
+    if (nh > ADD_MAX_HARMONICS) nh = ADD_MAX_HARMONICS;
 
-        for (int h = 0; h < nh; h++) {
-            float amp = s->harm_amps[h];
-            float phase_off = s->harm_phases[h];
+    for (int h = 0; h < nh; h++) {
+        float amp, freq_mult, phase_off;
+        float hf = (float)(h + 1);  /* 1-based harmonic index */
 
-            float freq_mult;
-            if (s->mode == ADD_MODE_HARMONIC) {
-                /* Harmonic: integer multiples, shifted by ratio, spread adds detune */
-                freq_mult = (float)(h + 1) * s->cluster_ratio;
-                freq_mult += s->cluster_spread * sinf((float)h * 1.618f);
-            } else {
-                /* Cluster: ratio-based exponential spacing */
-                freq_mult = powf(s->cluster_ratio, (float)h);
-                freq_mult += s->cluster_spread * sinf((float)h * 1.618f);
-            }
+        switch (s->mode) {
+        case ADD_MODE_HARMONIC:
+            freq_mult = hf * s->cluster_ratio;
+            freq_mult += s->cluster_spread * sinf((float)h * 1.618f);
+            amp = s->harm_amps[h];
+            if (h > 0) amp *= powf(s->cluster_rolloff, (float)h);
+            phase_off = s->harm_phases[h];
+            break;
 
-            /* Rolloff applied in both modes */
-            if (h > 0) {
-                amp *= powf(s->cluster_rolloff, (float)h);
-            }
+        case ADD_MODE_CLUSTER:
+            freq_mult = powf(s->cluster_ratio, (float)h);
+            freq_mult += s->cluster_spread * sinf((float)h * 1.618f);
+            amp = s->harm_amps[h];
+            if (h > 0) amp *= powf(s->cluster_rolloff, (float)h);
+            phase_off = s->harm_phases[h];
+            break;
 
-            if (fabsf(amp) < 0.0001f) continue;
+        case ADD_MODE_FORMANT: {
+            /* Gaussian peak around formant_center */
+            float f = hf * 110.0f; /* approximate freq at A2 fundamental */
+            float dist = (f - s->formant_center) / (s->formant_width + 1.0f);
+            amp = expf(-0.5f * dist * dist);
+            if (h > 0) amp *= powf(s->cluster_rolloff, (float)h * 0.3f);
+            freq_mult = hf;
+            phase_off = 0;
+            break;
+        }
 
-            for (int i = 0; i < ADD_TABLE_SIZE; i++) {
-                float t = (float)i / (float)ADD_TABLE_SIZE;
-                s->table[i] += amp * sinf(ADD_TAU * freq_mult * t + phase_off);
-            }
+        case ADD_MODE_METALLIC: {
+            /* Inharmonic: stretch partials away from integer ratios */
+            float stretch = 1.0f + s->metal_inharmonicity * (float)h * 0.02f;
+            freq_mult = hf * stretch;
+            /* Add some pseudo-random detuning for bell-like quality */
+            freq_mult += sinf(hf * 2.718f) * s->metal_inharmonicity * 0.5f;
+            amp = 1.0f / (1.0f + (float)h * 0.5f);
+            if (h > 0) amp *= powf(s->cluster_rolloff, (float)h);
+            phase_off = sinf(hf * 1.414f) * (float)M_PI; /* random-ish phase */
+            break;
+        }
+
+        case ADD_MODE_NOISE: {
+            /* Noise-shaped: amplitude from noise function, frequencies stretched */
+            ke_ensure_fnl();
+            float nv = fnlGetNoise2D(&g_fnl, hf * 0.7f + 13.37f, hf * 0.3f);
+            amp = (nv + 1.0f) * 0.5f; /* 0-1 */
+            amp *= 1.0f / (1.0f + (float)h * 0.3f); /* rolloff */
+            freq_mult = hf + s->cluster_spread * nv;
+            phase_off = nv * (float)M_PI;
+            break;
+        }
+
+        case ADD_MODE_EXPR: {
+            /* Expression-driven: evaluate amp(h) and freq(h) */
+            KeySeqCtx ctx = {0};
+            ctx.n = hf;        /* h as 'n' variable */
+            ctx.i = hf;        /* h as 'i' variable */
+            ctx.root = (float)nh;  /* total harmonics as 'root' */
+            ctx.v = 1.0f;
+
+            amp = s->amp_expr.valid ? ke_eval(&s->amp_expr, &ctx) : (1.0f / hf);
+            freq_mult = s->freq_expr.valid ? ke_eval(&s->freq_expr, &ctx) : hf;
+            phase_off = s->phase_expr.valid ? ke_eval(&s->phase_expr, &ctx) : 0;
+            break;
+        }
+
+        default:
+            amp = 0; freq_mult = hf; phase_off = 0;
+            break;
+        }
+
+        if (fabsf(amp) < 0.0001f || freq_mult < 0.01f) continue;
+
+        for (int i = 0; i < ADD_TABLE_SIZE; i++) {
+            float t = (float)i / (float)ADD_TABLE_SIZE;
+            s->table[i] += amp * sinf(ADD_TAU * freq_mult * t + phase_off);
         }
     }
 
@@ -261,10 +352,12 @@ static void additive_init(void *state) {
     s->decay = 0.1f;
     s->sustain = 0.7f;
     s->release = 0.3f;
-    s->cluster_fundamental = 220.0f;
-    s->cluster_ratio = 1.5f;
+    s->cluster_ratio = 1.0f;
     s->cluster_spread = 0.0f;
     s->cluster_rolloff = 0.7f;
+    s->formant_center = 800.0f;
+    s->formant_width = 200.0f;
+    s->metal_inharmonicity = 0.5f;
 
     /* Default: sawtooth (1/h) */
     for (int h = 0; h < ADD_MAX_HARMONICS; h++)
@@ -358,7 +451,7 @@ static void additive_set_param(void *state, const char *name, float value) {
     fprintf(stderr, "[additive] set_param %s = %.4f\n", name, (double)value);
 
     if (strcmp(name, "volume") == 0)    { s->volume = value < 0 ? 0 : value > 1 ? 1 : value; }
-    else if (strcmp(name, "mode") == 0) { s->mode = (int)value % 3; s->table_dirty = 1; }
+    else if (strcmp(name, "mode") == 0) { s->mode = (int)value % ADD_MODE_COUNT; s->table_dirty = 1; }
     else if (strcmp(name, "harmonics") == 0) { s->num_harmonics = (int)value; if (s->num_harmonics<1) s->num_harmonics=1; if (s->num_harmonics>ADD_MAX_HARMONICS) s->num_harmonics=ADD_MAX_HARMONICS; s->table_dirty=1; }
     else if (strcmp(name, "attack") == 0)    s->attack = value;
     else if (strcmp(name, "decay") == 0)     s->decay = value;
@@ -367,7 +460,16 @@ static void additive_set_param(void *state, const char *name, float value) {
     /* Cluster params */
     else if (strcmp(name, "ratio") == 0)     { s->cluster_ratio = value; s->table_dirty = 1; }
     else if (strcmp(name, "spread") == 0)    { s->cluster_spread = value; s->table_dirty = 1; }
-    else if (strcmp(name, "rolloff") == 0)   { s->cluster_rolloff = value; s->table_dirty = 1; }
+    else if (strcmp(name, "rolloff") == 0)    { s->cluster_rolloff = value; s->table_dirty = 1; }
+    /* Formant mode */
+    else if (strcmp(name, "formant_center") == 0) { s->formant_center = value; s->table_dirty = 1; }
+    else if (strcmp(name, "formant_width") == 0)  { s->formant_width = value; s->table_dirty = 1; }
+    /* Metallic mode */
+    else if (strcmp(name, "inharmonicity") == 0)  { s->metal_inharmonicity = value; s->table_dirty = 1; }
+    /* Expression mode */
+    else if (strcmp(name, "amp_expr") == 0) {
+        /* value is ignored — expression set via osc_handle string path */
+    }
     /* Per-harmonic amplitude: harm_0, harm_1, ... harm_63 */
     else if (strncmp(name, "harm_", 5) == 0) {
         int h = atoi(name + 5);
@@ -393,6 +495,8 @@ static void additive_osc_handle(void *state, const char *sub_path,
     else if (strncmp(sub_path, "/param/", 7) == 0) {
         additive_set_param(state, sub_path + 7, nf >= 1 ? fargs[0] : 0);
     }
+    /* Expression strings via /expr/amp, /expr/freq, /expr/phase
+     * Pass the expression as the remaining path after /expr/<type>/ */
     /* Set all harmonics from a rule: /harmonics/sawtooth, /harmonics/square, etc. */
     else if (strcmp(sub_path, "/harmonics/sawtooth") == 0) {
         for (int h = 0; h < ADD_MAX_HARMONICS; h++) s->harm_amps[h] = 1.0f / (float)(h + 1);
@@ -425,7 +529,7 @@ static int additive_json_status(void *state, char *buf, int max) {
     for (int i = 0; i < ADD_MAX_VOICES; i++)
         if (s->voices[i].active) active++;
 
-    static const char *mode_names[] = {"harmonic", "partial", "cluster"};
+    static const char *mode_names[] = {"harmonic","cluster","formant","metallic","noise","expr"};
     int pos = 0;
     pos += snprintf(buf + pos, (size_t)(max - pos),
         "\"instrument_type\":\"additive\","
@@ -446,16 +550,32 @@ static int additive_json_save(void *state, char *buf, int max) {
     pos += snprintf(buf + pos, (size_t)(max - pos),
         "\"mode\":%d,\"harmonics\":%d,\"volume\":%.4f,"
         "\"attack\":%.4f,\"decay\":%.4f,\"sustain\":%.4f,\"release\":%.4f,"
-        "\"ratio\":%.4f,\"spread\":%.4f,\"rolloff\":%.4f",
+        "\"ratio\":%.4f,\"spread\":%.4f,\"rolloff\":%.4f,"
+        "\"formant_center\":%.1f,\"formant_width\":%.1f,\"inharmonicity\":%.4f",
         s->mode, s->num_harmonics, (double)s->volume,
         (double)s->attack, (double)s->decay, (double)s->sustain, (double)s->release,
-        (double)s->cluster_ratio, (double)s->cluster_spread, (double)s->cluster_rolloff);
+        (double)s->cluster_ratio, (double)s->cluster_spread, (double)s->cluster_rolloff,
+        (double)s->formant_center, (double)s->formant_width, (double)s->metal_inharmonicity);
 
     /* Save harmonic amplitudes */
     pos += snprintf(buf + pos, (size_t)(max - pos), ",\"amps\":[");
     for (int h = 0; h < s->num_harmonics; h++)
         pos += snprintf(buf + pos, (size_t)(max - pos), "%s%.4f", h?",":"", (double)s->harm_amps[h]);
     pos += snprintf(buf + pos, (size_t)(max - pos), "]");
+
+    /* Expression sources */
+    if (s->amp_expr_src[0]) {
+        char esc[512]; json_escape(esc, sizeof(esc), s->amp_expr_src);
+        pos += snprintf(buf + pos, (size_t)(max - pos), ",\"amp_expr\":\"%s\"", esc);
+    }
+    if (s->freq_expr_src[0]) {
+        char esc[512]; json_escape(esc, sizeof(esc), s->freq_expr_src);
+        pos += snprintf(buf + pos, (size_t)(max - pos), ",\"freq_expr\":\"%s\"", esc);
+    }
+    if (s->phase_expr_src[0]) {
+        char esc[512]; json_escape(esc, sizeof(esc), s->phase_expr_src);
+        pos += snprintf(buf + pos, (size_t)(max - pos), ",\"phase_expr\":\"%s\"", esc);
+    }
 
     return pos;
 }
@@ -464,7 +584,7 @@ static int additive_json_load(void *state, const char *json) {
     AdditiveState *s = (AdditiveState *)state;
     int ival; float fval;
     fprintf(stderr, "[additive] json_load: parsing...\n");
-    if (json_get_int(json, "mode", &ival) == 0) { s->mode = ival % 3; fprintf(stderr, "[additive]   mode=%d\n", s->mode); }
+    if (json_get_int(json, "mode", &ival) == 0) { s->mode = ival % ADD_MODE_COUNT; fprintf(stderr, "[additive]   mode=%d\n", s->mode); }
     if (json_get_int(json, "harmonics", &ival) == 0) { s->num_harmonics = ival; fprintf(stderr, "[additive]   harmonics=%d\n", ival); }
     if (json_get_float(json, "volume", &fval) == 0) { s->volume = fval; fprintf(stderr, "[additive]   volume=%.4f\n", (double)fval); }
     if (json_get_float(json, "attack", &fval) == 0) s->attack = fval;
@@ -473,7 +593,24 @@ static int additive_json_load(void *state, const char *json) {
     if (json_get_float(json, "release", &fval) == 0) s->release = fval;
     if (json_get_float(json, "ratio", &fval) == 0) { s->cluster_ratio = fval; fprintf(stderr, "[additive]   ratio=%.4f\n", (double)fval); }
     if (json_get_float(json, "spread", &fval) == 0) { s->cluster_spread = fval; fprintf(stderr, "[additive]   spread=%.4f\n", (double)fval); }
-    if (json_get_float(json, "rolloff", &fval) == 0) { s->cluster_rolloff = fval; fprintf(stderr, "[additive]   rolloff=%.4f\n", (double)fval); }
+    if (json_get_float(json, "rolloff", &fval) == 0) { s->cluster_rolloff = fval; }
+    if (json_get_float(json, "formant_center", &fval) == 0) s->formant_center = fval;
+    if (json_get_float(json, "formant_width", &fval) == 0) s->formant_width = fval;
+    if (json_get_float(json, "inharmonicity", &fval) == 0) s->metal_inharmonicity = fval;
+    /* Restore expressions */
+    char expr_buf[256];
+    if (json_get_string(json, "amp_expr", expr_buf, sizeof(expr_buf)) == 0 && expr_buf[0]) {
+        strncpy(s->amp_expr_src, expr_buf, 255);
+        ke_compile(&s->amp_expr, expr_buf);
+    }
+    if (json_get_string(json, "freq_expr", expr_buf, sizeof(expr_buf)) == 0 && expr_buf[0]) {
+        strncpy(s->freq_expr_src, expr_buf, 255);
+        ke_compile(&s->freq_expr, expr_buf);
+    }
+    if (json_get_string(json, "phase_expr", expr_buf, sizeof(expr_buf)) == 0 && expr_buf[0]) {
+        strncpy(s->phase_expr_src, expr_buf, 255);
+        ke_compile(&s->phase_expr, expr_buf);
+    }
     s->table_dirty = 1;
     fprintf(stderr, "[additive] json_load done: mode=%d harmonics=%d vol=%.2f\n",
             s->mode, s->num_harmonics, (double)s->volume);

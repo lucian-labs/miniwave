@@ -948,16 +948,34 @@ static void http_handle_api(int fd, const char *body) {
         /* ── additive schema ── */
         pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
             "\"additive\":{\"params\":["
-            "{\"name\":\"mode\",\"min\":0,\"max\":2,\"default\":0,\"type\":\"int\",\"labels\":[\"Harmonic\",\"Partial\",\"Cluster\"]},"
+            "{\"name\":\"mode\",\"min\":0,\"max\":5,\"default\":0,\"type\":\"int\",\"labels\":[\"Harmonic\",\"Cluster\",\"Formant\",\"Metallic\",\"Noise\",\"Expression\"]},"
             "{\"name\":\"harmonics\",\"min\":1,\"max\":64,\"default\":16,\"type\":\"int\"},"
             "{\"name\":\"volume\",\"min\":0,\"max\":1,\"default\":1,\"type\":\"float\"},"
             "{\"name\":\"attack\",\"min\":0.001,\"max\":2,\"default\":0.01,\"type\":\"float\"},"
             "{\"name\":\"decay\",\"min\":0.001,\"max\":3,\"default\":0.1,\"type\":\"float\"},"
             "{\"name\":\"sustain\",\"min\":0,\"max\":1,\"default\":0.7,\"type\":\"float\"},"
             "{\"name\":\"release\",\"min\":0.001,\"max\":4,\"default\":0.3,\"type\":\"float\"},"
-            "{\"name\":\"ratio\",\"min\":0.5,\"max\":4,\"default\":1.5,\"type\":\"float\",\"group\":\"cluster\"},"
-            "{\"name\":\"spread\",\"min\":0,\"max\":2,\"default\":0,\"type\":\"float\",\"group\":\"cluster\"},"
-            "{\"name\":\"rolloff\",\"min\":0,\"max\":1,\"default\":0.7,\"type\":\"float\",\"group\":\"cluster\"}"
+            "{\"name\":\"ratio\",\"min\":0.5,\"max\":4,\"default\":1.0,\"type\":\"float\",\"group\":\"shape\"},"
+            "{\"name\":\"spread\",\"min\":0,\"max\":2,\"default\":0,\"type\":\"float\",\"group\":\"shape\"},"
+            "{\"name\":\"rolloff\",\"min\":0,\"max\":1,\"default\":0.7,\"type\":\"float\",\"group\":\"shape\"},"
+            "{\"name\":\"formant_center\",\"min\":100,\"max\":5000,\"default\":800,\"type\":\"float\",\"group\":\"formant\",\"scale\":\"log\"},"
+            "{\"name\":\"formant_width\",\"min\":10,\"max\":2000,\"default\":200,\"type\":\"float\",\"group\":\"formant\"},"
+            "{\"name\":\"inharmonicity\",\"min\":0,\"max\":1,\"default\":0.5,\"type\":\"float\",\"group\":\"metallic\"}"
+            "],\"envelopes\":["
+            "{\"name\":\"envelope\",\"attack\":\"attack\",\"decay\":\"decay\",\"sustain\":\"sustain\",\"release\":\"release\"}"
+            "]},"
+
+            /* ── phase-dist schema ── */
+            "\"phase-dist\":{\"params\":["
+            "{\"name\":\"mode\",\"min\":0,\"max\":5,\"default\":0,\"type\":\"int\",\"labels\":[\"Resonant\",\"Saw\",\"Pulse\",\"Cosine\",\"Sync\",\"Wavefold\"]},"
+            "{\"name\":\"distortion\",\"min\":0,\"max\":1,\"default\":0.5,\"type\":\"float\"},"
+            "{\"name\":\"timbre\",\"min\":0,\"max\":1,\"default\":0.5,\"type\":\"float\"},"
+            "{\"name\":\"color\",\"min\":0,\"max\":1,\"default\":0.5,\"type\":\"float\"},"
+            "{\"name\":\"volume\",\"min\":0,\"max\":1,\"default\":1,\"type\":\"float\"},"
+            "{\"name\":\"attack\",\"min\":0.001,\"max\":2,\"default\":0.01,\"type\":\"float\"},"
+            "{\"name\":\"decay\",\"min\":0.001,\"max\":3,\"default\":0.2,\"type\":\"float\"},"
+            "{\"name\":\"sustain\",\"min\":0,\"max\":1,\"default\":0.6,\"type\":\"float\"},"
+            "{\"name\":\"release\",\"min\":0.001,\"max\":4,\"default\":0.3,\"type\":\"float\"}"
             "],\"envelopes\":["
             "{\"name\":\"envelope\",\"attack\":\"attack\",\"decay\":\"decay\",\"sustain\":\"sustain\",\"release\":\"release\"}"
             "]}"
@@ -1348,6 +1366,46 @@ static void http_handle_api(int fd, const char *body) {
             strncpy(g_patches[idx].name, new_name, PATCH_NAME_MAX - 1);
             patches_save();
             rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        }
+    }
+    else if (strcmp(type_str, "additive_expr") == 0) {
+        /* Set expression strings on additive synth */
+        int ch = 0;
+        char amp_src[256] = "", freq_src[256] = "", phase_src[256] = "";
+        json_get_int(body, "channel", &ch);
+        json_get_string(body, "amp", amp_src, sizeof(amp_src));
+        json_get_string(body, "freq", freq_src, sizeof(freq_src));
+        json_get_string(body, "phase", phase_src, sizeof(phase_src));
+
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            if (slot->active && slot->state &&
+                strcmp(g_type_registry[slot->type_idx]->name, "additive") == 0) {
+                AdditiveState *as = (AdditiveState *)slot->state;
+                if (amp_src[0]) {
+                    strncpy(as->amp_expr_src, amp_src, 255);
+                    ke_compile(&as->amp_expr, amp_src);
+                    fprintf(stderr, "[additive] amp_expr: %s (valid=%d)\n", amp_src, as->amp_expr.valid);
+                }
+                if (freq_src[0]) {
+                    strncpy(as->freq_expr_src, freq_src, 255);
+                    ke_compile(&as->freq_expr, freq_src);
+                    fprintf(stderr, "[additive] freq_expr: %s (valid=%d)\n", freq_src, as->freq_expr.valid);
+                }
+                if (phase_src[0]) {
+                    strncpy(as->phase_expr_src, phase_src, 255);
+                    ke_compile(&as->phase_expr, phase_src);
+                }
+                as->table_dirty = 1;
+                state_mark_dirty();
+                rlen = snprintf(resp, sizeof(resp),
+                    "{\"ok\":true,\"amp_valid\":%d,\"freq_valid\":%d,\"phase_valid\":%d}",
+                    as->amp_expr.valid, as->freq_expr.valid, as->phase_expr.valid);
+            } else {
+                rlen = snprintf(resp, sizeof(resp), "{\"error\":\"not additive\"}");
+            }
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"bad channel\"}");
         }
     }
     else if (strcmp(type_str, "waveform") == 0) {
