@@ -489,6 +489,56 @@ static int fm_synth_osc_status(void *state, uint8_t *buf, int max_len) {
     return pos;
 }
 
+/* ── json_status — instrument-specific JSON fields ─────────────────── */
+
+static int fm_synth_json_status(void *state, char *buf, int max) {
+    FMSynth *s = (FMSynth *)state;
+    const char *pname = (s->current_preset >= 0 && s->current_preset < NUM_PRESETS)
+                        ? PRESET_NAMES[s->current_preset] : "Unknown";
+
+    float params[8];
+    if (s->live_params.override) {
+        params[0] = s->live_params.carrier_ratio;
+        params[1] = s->live_params.mod_ratio;
+        params[2] = s->live_params.mod_index;
+        params[3] = s->live_params.attack;
+        params[4] = s->live_params.decay;
+        params[5] = s->live_params.sustain;
+        params[6] = s->live_params.release;
+        params[7] = s->live_params.feedback;
+    } else {
+        const FMPreset *ep = &PRESETS[s->current_preset];
+        params[0] = ep->carrier_ratio;
+        params[1] = ep->mod_ratio;
+        params[2] = ep->mod_index;
+        params[3] = ep->attack;
+        params[4] = ep->decay;
+        params[5] = ep->sustain;
+        params[6] = ep->release;
+        params[7] = ep->feedback;
+    }
+
+    int active_voices = 0;
+    for (int v = 0; v < FM_MAX_VOICES; v++)
+        if (s->voices[v].active) active_voices++;
+
+    return snprintf(buf, (size_t)max,
+        "\"instrument_type\":\"fm-synth\","
+        "\"preset_index\":%d,\"preset_name\":\"%s\","
+        "\"volume\":%.4f,\"override\":%d,"
+        "\"params\":{"
+        "\"carrier_ratio\":%.4f,\"mod_ratio\":%.4f,\"mod_index\":%.4f,"
+        "\"attack\":%.4f,\"decay\":%.4f,\"sustain\":%.4f,"
+        "\"release\":%.4f,\"feedback\":%.4f},"
+        "\"active_voices\":%d",
+        s->current_preset, pname,
+        (double)s->volume, s->live_params.override,
+        (double)params[0], (double)params[1], (double)params[2],
+        (double)params[3], (double)params[4], (double)params[5],
+        (double)params[6], (double)params[7],
+        active_voices);
+}
+
 /* ── set_param — named parameter setter ────────────────────────────── */
 
 static void fm_synth_set_param(void *state, const char *name, float value) {
@@ -528,6 +578,7 @@ InstrumentType fm_synth_type = {
     .midi         = fm_synth_midi,
     .render       = fm_synth_render,
     .set_param    = fm_synth_set_param,
+    .json_status  = fm_synth_json_status,
     .osc_handle   = fm_synth_osc_handle,
     .osc_status   = fm_synth_osc_status,
 };

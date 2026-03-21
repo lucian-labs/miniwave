@@ -2181,6 +2181,31 @@ static int ym2413_osc_status(void *state, uint8_t *buf, int max_len) {
     return pos;
 }
 
+/* ── json_status — instrument-specific JSON fields ────────────────────── */
+
+static int ym2413_json_status(void *state, char *buf, int max) {
+    YM2413State *y = (YM2413State *)state;
+    const char *inst_names[] = {
+        "Custom","Violin","Guitar","Piano","Flute","Clarinet","Oboe",
+        "Trumpet","Organ","Horn","Synthesizer","Harpsichord",
+        "Vibraphone","Synth Bass","Acoustic Bass","Electric Guitar"
+    };
+    const char *iname = (y->current_instrument >= 0 && y->current_instrument <= 15)
+                        ? inst_names[y->current_instrument] : "Unknown";
+    int active_ch = 0;
+    int nch = y->rhythm_mode ? 6 : 9;
+    for (int i = 0; i < nch; i++)
+        if (y->channels[i].key_on) active_ch++;
+
+    return snprintf(buf, (size_t)max,
+        "\"instrument_type\":\"ym2413\","
+        "\"preset_index\":%d,\"preset_name\":\"%s\","
+        "\"rhythm_mode\":%d,"
+        "\"active_voices\":%d",
+        y->current_instrument, iname,
+        y->rhythm_mode, active_ch);
+}
+
 /* ── set_param — named parameter setter ───────────────────────────────── */
 
 static void ym2413_set_param(void *state, const char *name, float value) {
@@ -2223,6 +2248,7 @@ InstrumentType ym2413_type = {
     .midi         = ym2413_midi,
     .render       = ym2413_render,
     .set_param    = ym2413_set_param,
+    .json_status  = ym2413_json_status,
     .osc_handle   = ym2413_osc_handle,
     .osc_status   = ym2413_osc_status,
 };

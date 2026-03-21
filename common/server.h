@@ -169,7 +169,26 @@ static int build_midi_devices_json(char *buf, int max) {
     return pos;
 }
 
-static int build_ch_status_json(int ch, char *buf, int max) {
+static int append_keyseq_to_ch_status(int ch, char *buf, int pos, int max) {
+    RackSlot *slot = &g_rack.slots[ch];
+    if (!slot->active || !slot->state) return pos;
+    const char *tname = g_type_registry[slot->type_idx]->name;
+    KeySeq *ks = NULL;
+    if (strcmp(tname, "fm-synth") == 0) ks = &((FMSynth *)slot->state)->keyseq;
+    else if (strcmp(tname, "sub-synth") == 0) ks = &((SubSynth *)slot->state)->keyseq;
+    else if (strcmp(tname, "ym2413") == 0) ks = &((YM2413State *)slot->state)->keyseq;
+    else if (strcmp(tname, "fm-drums") == 0) ks = &((FMDrumState *)slot->state)->keyseq;
+    if (ks) {
+        char esc[256];
+        json_escape(esc, sizeof(esc), ks->source);
+        pos += snprintf(buf + pos, (size_t)(max - pos),
+            ",\"keyseq_enabled\":%d,\"keyseq_dsl\":\"%s\"",
+            ks->enabled && (ks->num_steps > 0 || ks->algo_mode), esc);
+    }
+    return pos;
+}
+
+static int build_ch_status_json_inner(int ch, char *buf, int max) {
     RackSlot *slot = &g_rack.slots[ch];
     if (!slot->active || !slot->state || slot->type_idx < 0)
         return snprintf(buf, (size_t)max,
@@ -177,145 +196,32 @@ static int build_ch_status_json(int ch, char *buf, int max) {
 
     InstrumentType *itype = g_type_registry[slot->type_idx];
 
-    if (strcmp(itype->name, "ym2413") == 0) {
-        YM2413State *y = (YM2413State *)slot->state;
-        const char *inst_names[] = {
-            "Custom","Violin","Guitar","Piano","Flute","Clarinet","Oboe",
-            "Trumpet","Organ","Horn","Synthesizer","Harpsichord",
-            "Vibraphone","Synth Bass","Acoustic Bass","Electric Guitar"
-        };
-        const char *iname = (y->current_instrument >= 0 && y->current_instrument <= 15)
-                            ? inst_names[y->current_instrument] : "Unknown";
-        int active_ch = 0;
-        int nch = y->rhythm_mode ? 6 : 9;
-        for (int i = 0; i < nch; i++)
-            if (y->channels[i].key_on) active_ch++;
-
-        return snprintf(buf, (size_t)max,
-            "{\"type\":\"ch_status\",\"channel\":%d,"
-            "\"instrument_type\":\"ym2413\","
-            "\"preset_index\":%d,\"preset_name\":\"%s\","
-            "\"rhythm_mode\":%d,"
-            "\"active_voices\":%d}",
-            ch, y->current_instrument, iname,
-            y->rhythm_mode, active_ch);
+    /* Use vtable json_status when available */
+    if (itype->json_status) {
+        int pos = snprintf(buf, (size_t)max,
+            "{\"type\":\"ch_status\",\"channel\":%d,", ch);
+        pos += itype->json_status(slot->state, buf + pos, max - pos);
+        if (pos < max - 1) buf[pos++] = '}';
+        buf[pos] = '\0';
+        return pos;
     }
 
-    if (strcmp(itype->name, "sub-synth") == 0) {
-        SubSynth *sub = (SubSynth *)slot->state;
-        int active_v = 0;
-        for (int v = 0; v < SUB_MAX_VOICES; v++)
-            if (sub->voices[v].active) active_v++;
-
-        const char *wave_names[] = {"Saw","Square","Pulse","Triangle","Sine","Noise"};
-        const char *wname = (sub->params.waveform >= 0 && sub->params.waveform < SUB_WAVE_COUNT)
-                            ? wave_names[sub->params.waveform] : "Saw";
-
-        return snprintf(buf, (size_t)max,
-            "{\"type\":\"ch_status\",\"channel\":%d,"
-            "\"instrument_type\":\"sub-synth\","
-            "\"waveform\":%d,\"waveform_name\":\"%s\","
-            "\"volume\":%.4f,"
-            "\"params\":{"
-            "\"filter_cutoff\":%.4f,\"filter_reso\":%.4f,"
-            "\"filter_env_depth\":%.4f,\"pulse_width\":%.4f,"
-            "\"filt_attack\":%.4f,\"filt_decay\":%.4f,"
-            "\"filt_sustain\":%.4f,\"filt_release\":%.4f,"
-            "\"amp_attack\":%.4f,\"amp_decay\":%.4f,"
-            "\"amp_sustain\":%.4f,\"amp_release\":%.4f},"
-            "\"active_voices\":%d}",
-            ch, sub->params.waveform, wname,
-            (double)sub->volume,
-            (double)sub->params.filter_cutoff, (double)sub->params.filter_reso,
-            (double)sub->params.filter_env_depth, (double)sub->params.pulse_width,
-            (double)sub->params.filt_attack, (double)sub->params.filt_decay,
-            (double)sub->params.filt_sustain, (double)sub->params.filt_release,
-            (double)sub->params.amp_attack, (double)sub->params.amp_decay,
-            (double)sub->params.amp_sustain, (double)sub->params.amp_release,
-            active_v);
-    }
-
-    /* FM Drums */
-    if (strcmp(itype->name, "fm-drums") == 0) {
-        FMDrumState *ds = (FMDrumState *)slot->state;
-        int active_v = 0;
-        for (int v = 0; v < FMD_MAX_VOICES; v++)
-            if (ds->voices[v].active) active_v++;
-
-        int en = ds->editing_note;
-        if (en < 0 || en >= FMD_NUM_NOTES) en = 36;
-        const FMDrumNote *dn = &ds->notes[en];
-        const char *pname = (dn->preset >= 0 && dn->preset < FMD_NUM_PRESETS)
-                            ? FMD_PRESET_NAMES[dn->preset] : "Custom";
-        const FMDrumDef *ed = &dn->def;
-
-        return snprintf(buf, (size_t)max,
-            "{\"type\":\"ch_status\",\"channel\":%d,"
-            "\"instrument_type\":\"fm-drums\","
-            "\"volume\":%.4f,"
-            "\"editing_note\":%d,\"preset\":%d,\"preset_name\":\"%s\","
-            "\"params\":{"
-            "\"carrier_freq\":%.4f,\"mod_freq\":%.4f,\"mod_index\":%.4f,"
-            "\"pitch_sweep\":%.4f,\"pitch_decay\":%.5f,"
-            "\"decay\":%.4f,\"noise_amt\":%.4f,"
-            "\"click_amt\":%.4f,\"feedback\":%.4f},"
-            "\"active_voices\":%d}",
-            ch, (double)ds->volume,
-            en, dn->preset, pname,
-            (double)ed->carrier_freq, (double)ed->mod_freq, (double)ed->mod_index,
-            (double)ed->pitch_sweep, (double)ed->pitch_decay,
-            (double)ed->decay, (double)ed->noise_amt,
-            (double)ed->click_amt, (double)ed->feedback,
-            active_v);
-    }
-
-    /* Default: FM synth */
-    FMSynth *s = (FMSynth *)slot->state;
-    const char *pname = (s->current_preset >= 0 && s->current_preset < NUM_PRESETS)
-                        ? PRESET_NAMES[s->current_preset] : "Unknown";
-
-    float params[8];
-    if (s->live_params.override) {
-        params[0] = s->live_params.carrier_ratio;
-        params[1] = s->live_params.mod_ratio;
-        params[2] = s->live_params.mod_index;
-        params[3] = s->live_params.attack;
-        params[4] = s->live_params.decay;
-        params[5] = s->live_params.sustain;
-        params[6] = s->live_params.release;
-        params[7] = s->live_params.feedback;
-    } else {
-        const FMPreset *ep = &PRESETS[s->current_preset];
-        params[0] = ep->carrier_ratio;
-        params[1] = ep->mod_ratio;
-        params[2] = ep->mod_index;
-        params[3] = ep->attack;
-        params[4] = ep->decay;
-        params[5] = ep->sustain;
-        params[6] = ep->release;
-        params[7] = ep->feedback;
-    }
-
-    int active_voices = 0;
-    for (int v = 0; v < FM_MAX_VOICES; v++)
-        if (s->voices[v].active) active_voices++;
-
+    /* Fallback — should not be reached once all instruments have json_status */
     return snprintf(buf, (size_t)max,
-        "{\"type\":\"ch_status\",\"channel\":%d,"
-        "\"instrument_type\":\"fm-synth\","
-        "\"preset_index\":%d,\"preset_name\":\"%s\","
-        "\"volume\":%.4f,\"override\":%d,"
-        "\"params\":{"
-        "\"carrier_ratio\":%.4f,\"mod_ratio\":%.4f,\"mod_index\":%.4f,"
-        "\"attack\":%.4f,\"decay\":%.4f,\"sustain\":%.4f,"
-        "\"release\":%.4f,\"feedback\":%.4f},"
-        "\"active_voices\":%d}",
-        ch, s->current_preset, pname,
-        (double)s->volume, s->live_params.override,
-        (double)params[0], (double)params[1], (double)params[2],
-        (double)params[3], (double)params[4], (double)params[5],
-        (double)params[6], (double)params[7],
-        active_voices);
+        "{\"type\":\"ch_status\",\"channel\":%d,\"instrument_type\":\"%s\"}",
+        ch, itype->name);
+}
+
+static int build_ch_status_json(int ch, char *buf, int max) {
+    int len = build_ch_status_json_inner(ch, buf, max);
+    /* Strip trailing }, append keyseq state, re-close */
+    if (len > 1 && buf[len - 1] == '}') {
+        len--;
+        len = append_keyseq_to_ch_status(ch, buf, len, max);
+        if (len < max - 1) buf[len++] = '}';
+        buf[len] = '\0';
+    }
+    return len;
 }
 
 static const char *OSC_SPEC_JSON =
@@ -897,15 +803,21 @@ static void http_handle_api(int fd, const char *body) {
         int ch = -1;
         json_get_int(body, "channel", &ch);
 
+        /* Spec response can be large — use heap buffer */
+        #define SPEC_BUF_SIZE 65536
+        char *sbuf = (char *)malloc(SPEC_BUF_SIZE);
+        if (!sbuf) { rlen = snprintf(resp, sizeof(resp), "{\"error\":\"oom\"}"); goto spec_done; }
+
         int pos = 0;
         int speclen = (int)strlen(KEYSEQ_SPEC_JSON);
-        memcpy(resp, KEYSEQ_SPEC_JSON, (size_t)(speclen - 1));
+        memcpy(sbuf, KEYSEQ_SPEC_JSON, (size_t)(speclen - 1));
         pos = speclen - 1;
 
         /* All instrument type param schemas */
-        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), ",\"instruments\":{");
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), ",\"instruments\":{");
 
-        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+        /* ── fm-synth schema + presets ── */
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
             "\"fm-synth\":{\"params\":["
             "{\"name\":\"carrier_ratio\",\"min\":0.1,\"max\":4,\"default\":1,\"type\":\"float\"},"
             "{\"name\":\"mod_ratio\",\"min\":0.1,\"max\":15,\"default\":2,\"type\":\"float\"},"
@@ -915,7 +827,27 @@ static void http_handle_api(int fd, const char *body) {
             "{\"name\":\"sustain\",\"min\":0,\"max\":1,\"default\":0.5,\"type\":\"float\"},"
             "{\"name\":\"release\",\"min\":0.01,\"max\":4,\"default\":0.3,\"type\":\"float\"},"
             "{\"name\":\"feedback\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"}"
-            "]},"
+            "],\"presets\":[");
+        for (int p = 0; p < NUM_PRESETS; p++) {
+            pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
+                "%s\"%s\"", p ? "," : "", PRESET_NAMES[p]);
+        }
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
+            "],\"families\":["
+            "{\"name\":\"Piano\",\"start\":0,\"count\":10},"
+            "{\"name\":\"Organ\",\"start\":10,\"count\":10},"
+            "{\"name\":\"Brass\",\"start\":20,\"count\":10},"
+            "{\"name\":\"Strings\",\"start\":30,\"count\":10},"
+            "{\"name\":\"Bass\",\"start\":40,\"count\":10},"
+            "{\"name\":\"Lead\",\"start\":50,\"count\":10},"
+            "{\"name\":\"Bell\",\"start\":60,\"count\":10},"
+            "{\"name\":\"Reed\",\"start\":70,\"count\":10},"
+            "{\"name\":\"SFX\",\"start\":80,\"count\":10},"
+            "{\"name\":\"Retro\",\"start\":90,\"count\":9}"
+            "]},");
+
+        /* ── sub-synth schema ── */
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
             "\"sub-synth\":{\"params\":["
             "{\"name\":\"waveform\",\"min\":0,\"max\":5,\"default\":0,\"type\":\"int\",\"labels\":[\"Saw\",\"Square\",\"Pulse\",\"Tri\",\"Sine\",\"Noise\"]},"
             "{\"name\":\"pulse_width\",\"min\":0.05,\"max\":0.95,\"default\":0.5,\"type\":\"float\"},"
@@ -930,7 +862,10 @@ static void http_handle_api(int fd, const char *body) {
             "{\"name\":\"amp_decay\",\"min\":0.001,\"max\":5,\"default\":0.1,\"type\":\"float\"},"
             "{\"name\":\"amp_sustain\",\"min\":0,\"max\":1,\"default\":0.8,\"type\":\"float\"},"
             "{\"name\":\"amp_release\",\"min\":0.001,\"max\":5,\"default\":0.15,\"type\":\"float\"}"
-            "]},"
+            "]},");
+
+        /* ── ym2413 schema + patches ── */
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
             "\"ym2413\":{\"params\":["
             "{\"name\":\"instrument\",\"min\":0,\"max\":15,\"default\":1,\"type\":\"int\"},"
             "{\"name\":\"volume\",\"min\":0,\"max\":1,\"default\":1,\"type\":\"float\"},"
@@ -938,7 +873,15 @@ static void http_handle_api(int fd, const char *body) {
             "{\"name\":\"vibrato\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
             "{\"name\":\"portamento\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
             "{\"name\":\"pitchbend\",\"min\":0.5,\"max\":2,\"default\":1,\"type\":\"float\"}"
-            "]},"
+            "],\"patches\":["
+            "\"Custom\",\"Violin\",\"Guitar\",\"Piano\",\"Flute\","
+            "\"Clarinet\",\"Oboe\",\"Trumpet\",\"Organ\",\"Horn\","
+            "\"Synthesizer\",\"Harpsichord\",\"Vibraphone\",\"Synth Bass\","
+            "\"Acoustic Bass\",\"Electric Guitar\""
+            "]},");
+
+        /* ── fm-drums schema + presets + drum map ── */
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
             "\"fm-drums\":{\"params\":["
             "{\"name\":\"carrier_freq\",\"min\":20,\"max\":2000,\"default\":200,\"type\":\"float\"},"
             "{\"name\":\"mod_freq\",\"min\":20,\"max\":2000,\"default\":300,\"type\":\"float\"},"
@@ -949,26 +892,43 @@ static void http_handle_api(int fd, const char *body) {
             "{\"name\":\"noise_amt\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
             "{\"name\":\"click_amt\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"},"
             "{\"name\":\"feedback\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"}"
-            "]}"
-            "}");
+            "],\"preset_names\":[");
+        for (int p = 0; p < FMD_NUM_PRESETS; p++) {
+            pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
+                "%s\"%s\"", p ? "," : "", FMD_PRESET_NAMES[p]);
+        }
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
+            "],\"drum_map\":["
+            "{\"note\":35,\"label\":\"Kick\"},{\"note\":36,\"label\":\"Kick\"},"
+            "{\"note\":38,\"label\":\"Snare\"},{\"note\":39,\"label\":\"Clap\"},"
+            "{\"note\":40,\"label\":\"Snare\"},{\"note\":41,\"label\":\"Tom\"},"
+            "{\"note\":42,\"label\":\"CH\"},{\"note\":43,\"label\":\"Tom\"},"
+            "{\"note\":44,\"label\":\"CH\"},{\"note\":45,\"label\":\"Tom\"},"
+            "{\"note\":46,\"label\":\"OH\"},{\"note\":47,\"label\":\"Tom\"},"
+            "{\"note\":48,\"label\":\"Tom\"},{\"note\":49,\"label\":\"Cymbal\"},"
+            "{\"note\":50,\"label\":\"Tom\"},{\"note\":51,\"label\":\"Cymbal\"}"
+            "]}");
 
-        /* Active channel state */
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), "}");
+
+        /* ── Active channel state ── */
         if (ch >= 0 && ch < MAX_SLOTS) {
             RackSlot *slot = &g_rack.slots[ch];
             if (slot->active && slot->state) {
                 const char *tname = g_type_registry[slot->type_idx]->name;
-                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
-                    ",\"channel\":%d,\"active_instrument\":\"%s\",\"current_values\":[", ch, tname);
+                pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
+                    ",\"channel\":%d,\"active_instrument\":\"%s\"", ch, tname);
 
+                /* Current param values */
+                pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), ",\"current_values\":[");
                 if (strcmp(tname, "fm-synth") == 0) {
                     FMSynth *s = (FMSynth *)slot->state;
                     float *lp = &s->live_params.carrier_ratio;
                     const char *names[] = {"carrier_ratio","mod_ratio","mod_index","attack","decay","sustain","release","feedback"};
                     for (int p = 0; p < 8; p++)
-                        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
                             "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)lp[p]);
-                }
-                else if (strcmp(tname, "sub-synth") == 0) {
+                } else if (strcmp(tname, "sub-synth") == 0) {
                     SubSynth *s = (SubSynth *)slot->state;
                     float vals[] = {(float)s->params.waveform, s->params.pulse_width,
                         s->params.filter_cutoff, s->params.filter_reso, s->params.filter_env_depth,
@@ -978,10 +938,9 @@ static void http_handle_api(int fd, const char *body) {
                         "filt_attack","filt_decay","filt_sustain","filt_release",
                         "amp_attack","amp_decay","amp_sustain","amp_release"};
                     for (int p = 0; p < 13; p++)
-                        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
                             "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)vals[p]);
-                }
-                else if (strcmp(tname, "fm-drums") == 0) {
+                } else if (strcmp(tname, "fm-drums") == 0) {
                     FMDrumState *ds = (FMDrumState *)slot->state;
                     int en = ds->editing_note; if (en < 0 || en >= FMD_NUM_NOTES) en = 36;
                     const FMDrumDef *d = &ds->notes[en].def;
@@ -990,26 +949,76 @@ static void http_handle_api(int fd, const char *body) {
                     const char *names[] = {"carrier_freq","mod_freq","mod_index","pitch_sweep",
                         "pitch_decay","decay","noise_amt","click_amt","feedback"};
                     for (int p = 0; p < 9; p++)
-                        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
                             "%s{\"name\":\"%s\",\"value\":%.4f}", p?",":"", names[p], (double)vals[p]);
-                }
-                else if (strcmp(tname, "ym2413") == 0) {
+                } else if (strcmp(tname, "ym2413") == 0) {
                     YM2413State *y = (YM2413State *)slot->state;
-                    pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                    pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
                         "{\"name\":\"instrument\",\"value\":%d},{\"name\":\"volume\",\"value\":%.4f},"
                         "{\"name\":\"rhythm\",\"value\":%d}",
                         y->current_instrument, (double)y->volume, y->rhythm_mode);
                 }
+                pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), "]");
 
-                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), "]");
+                /* KeySeq state */
+                KeySeq *ks = NULL;
+                if (strcmp(tname, "fm-synth") == 0) ks = &((FMSynth *)slot->state)->keyseq;
+                else if (strcmp(tname, "sub-synth") == 0) ks = &((SubSynth *)slot->state)->keyseq;
+                else if (strcmp(tname, "ym2413") == 0) ks = &((YM2413State *)slot->state)->keyseq;
+                else if (strcmp(tname, "fm-drums") == 0) ks = &((FMDrumState *)slot->state)->keyseq;
+                if (ks) {
+                    char esc_dsl[512];
+                    json_escape(esc_dsl, sizeof(esc_dsl), ks->source);
+                    pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
+                        ",\"keyseq\":{\"enabled\":%d,\"dsl\":\"%s\",\"algo\":%d,\"gated\":%d,"
+                        "\"loop\":%d,\"step_beats\":%.4f,\"gate_beats\":%.4f}",
+                        ks->enabled, esc_dsl, ks->algo_mode, ks->gated,
+                        ks->loop, (double)ks->step_beats, (double)ks->gate_beats);
+                }
             } else {
-                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
                     ",\"channel\":%d,\"active_instrument\":null", ch);
             }
         }
 
-        pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), "}");
-        rlen = pos;
+        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), "}");
+
+        /* Send from heap buffer */
+        http_send_response(fd, 200, "application/json", sbuf, pos);
+        free(sbuf);
+        return; /* skip the normal resp send below */
+        spec_done:;
+    }
+    else if (strcmp(type_str, "keyseq_status") == 0) {
+        int ch = 0;
+        json_get_int(body, "channel", &ch);
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            KeySeq *ks = NULL;
+            if (slot->active && slot->state) {
+                const char *tname = g_type_registry[slot->type_idx]->name;
+                if (strcmp(tname, "fm-synth") == 0) ks = &((FMSynth *)slot->state)->keyseq;
+                else if (strcmp(tname, "sub-synth") == 0) ks = &((SubSynth *)slot->state)->keyseq;
+                else if (strcmp(tname, "ym2413") == 0) ks = &((YM2413State *)slot->state)->keyseq;
+                else if (strcmp(tname, "fm-drums") == 0) ks = &((FMDrumState *)slot->state)->keyseq;
+            }
+            if (ks) {
+                char esc[512];
+                json_escape(esc, sizeof(esc), ks->source);
+                rlen = snprintf(resp, sizeof(resp),
+                    "{\"channel\":%d,\"enabled\":%d,\"dsl\":\"%s\","
+                    "\"algo\":%d,\"gated\":%d,\"loop\":%d,"
+                    "\"step_beats\":%.4f,\"gate_beats\":%.4f,"
+                    "\"playing\":%d}",
+                    ch, ks->enabled, esc, ks->algo_mode, ks->gated, ks->loop,
+                    (double)ks->step_beats, (double)ks->gate_beats, ks->playing);
+            } else {
+                rlen = snprintf(resp, sizeof(resp),
+                    "{\"channel\":%d,\"enabled\":0,\"dsl\":\"\"}", ch);
+            }
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"bad channel\"}");
+        }
     }
     else if (strcmp(type_str, "keyseq_preview") == 0) {
         int ch = 0;

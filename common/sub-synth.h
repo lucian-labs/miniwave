@@ -582,6 +582,41 @@ static int sub_synth_osc_status(void *state, uint8_t *buf, int max_len) {
     return pos;
 }
 
+/* ── json_status — instrument-specific JSON fields ────────────────────── */
+
+static int sub_synth_json_status(void *state, char *buf, int max) {
+    SubSynth *sub = (SubSynth *)state;
+    int active_v = 0;
+    for (int v = 0; v < SUB_MAX_VOICES; v++)
+        if (sub->voices[v].active) active_v++;
+
+    const char *wave_names[] = {"Saw","Square","Pulse","Triangle","Sine","Noise"};
+    const char *wname = (sub->params.waveform >= 0 && sub->params.waveform < SUB_WAVE_COUNT)
+                        ? wave_names[sub->params.waveform] : "Saw";
+
+    return snprintf(buf, (size_t)max,
+        "\"instrument_type\":\"sub-synth\","
+        "\"waveform\":%d,\"waveform_name\":\"%s\","
+        "\"volume\":%.4f,"
+        "\"params\":{"
+        "\"filter_cutoff\":%.4f,\"filter_reso\":%.4f,"
+        "\"filter_env_depth\":%.4f,\"pulse_width\":%.4f,"
+        "\"filt_attack\":%.4f,\"filt_decay\":%.4f,"
+        "\"filt_sustain\":%.4f,\"filt_release\":%.4f,"
+        "\"amp_attack\":%.4f,\"amp_decay\":%.4f,"
+        "\"amp_sustain\":%.4f,\"amp_release\":%.4f},"
+        "\"active_voices\":%d",
+        sub->params.waveform, wname,
+        (double)sub->volume,
+        (double)sub->params.filter_cutoff, (double)sub->params.filter_reso,
+        (double)sub->params.filter_env_depth, (double)sub->params.pulse_width,
+        (double)sub->params.filt_attack, (double)sub->params.filt_decay,
+        (double)sub->params.filt_sustain, (double)sub->params.filt_release,
+        (double)sub->params.amp_attack, (double)sub->params.amp_decay,
+        (double)sub->params.amp_sustain, (double)sub->params.amp_release,
+        active_v);
+}
+
 /* ── set_param — named parameter setter ───────────────────────────────── */
 
 static void sub_synth_set_param(void *state, const char *name, float value) {
@@ -618,6 +653,7 @@ InstrumentType sub_synth_type = {
     .midi         = sub_synth_midi,
     .render       = sub_synth_render,
     .set_param    = sub_synth_set_param,
+    .json_status  = sub_synth_json_status,
     .osc_handle   = sub_synth_osc_handle,
     .osc_status   = sub_synth_osc_status,
 };

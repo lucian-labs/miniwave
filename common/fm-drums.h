@@ -352,6 +352,40 @@ static int fmd_osc_status(void *state, uint8_t *buf, int max_len) {
     return 0;
 }
 
+/* ── json_status — instrument-specific JSON fields ─────────────────── */
+
+static int fmd_json_status(void *state, char *buf, int max) {
+    FMDrumState *ds = (FMDrumState *)state;
+    int active_v = 0;
+    for (int v = 0; v < FMD_MAX_VOICES; v++)
+        if (ds->voices[v].active) active_v++;
+
+    int en = ds->editing_note;
+    if (en < 0 || en >= FMD_NUM_NOTES) en = 36;
+    const FMDrumNote *dn = &ds->notes[en];
+    const char *pname = (dn->preset >= 0 && dn->preset < FMD_NUM_PRESETS)
+                        ? FMD_PRESET_NAMES[dn->preset] : "Custom";
+    const FMDrumDef *ed = &dn->def;
+
+    return snprintf(buf, (size_t)max,
+        "\"instrument_type\":\"fm-drums\","
+        "\"volume\":%.4f,"
+        "\"editing_note\":%d,\"preset\":%d,\"preset_name\":\"%s\","
+        "\"params\":{"
+        "\"carrier_freq\":%.4f,\"mod_freq\":%.4f,\"mod_index\":%.4f,"
+        "\"pitch_sweep\":%.4f,\"pitch_decay\":%.5f,"
+        "\"decay\":%.4f,\"noise_amt\":%.4f,"
+        "\"click_amt\":%.4f,\"feedback\":%.4f},"
+        "\"active_voices\":%d",
+        (double)ds->volume,
+        en, dn->preset, pname,
+        (double)ed->carrier_freq, (double)ed->mod_freq, (double)ed->mod_index,
+        (double)ed->pitch_sweep, (double)ed->pitch_decay,
+        (double)ed->decay, (double)ed->noise_amt,
+        (double)ed->click_amt, (double)ed->feedback,
+        active_v);
+}
+
 /* ── set_param — named parameter setter ───────────────────────────── */
 
 static void fmd_set_param(void *state, const char *name, float value) {
@@ -382,6 +416,7 @@ InstrumentType fm_drums_type = {
     .midi         = fmd_midi,
     .render       = fmd_render,
     .set_param    = fmd_set_param,
+    .json_status  = fmd_json_status,
     .osc_handle   = fmd_osc_handle,
     .osc_status   = fmd_osc_status,
 };
