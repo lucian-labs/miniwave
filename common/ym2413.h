@@ -299,6 +299,16 @@ static int ym2413_osc_status(void *state, uint8_t *buf, int max_len) {
 
 static int ym2413_json_status(void *state, char *buf, int max) {
     YM2413State *s = (YM2413State *)state;
+    e_uint8 regbuf[16]; /* patch2dump writes up to 14 bytes */
+    if (s->current_instrument > 0) {
+        OPLL_PATCH pair[2];
+        OPLL_getDefaultPatch(OPLL_2413_TONE, s->current_instrument, pair);
+        memset(regbuf, 0, sizeof(regbuf));
+        OPLL_patch2dump(pair, regbuf);
+    } else {
+        for (int i = 0; i < 8; i++) regbuf[i] = s->opll->reg[i];
+    }
+    e_uint8 *r = regbuf;
     const char *iname = (s->current_instrument >= 0 && s->current_instrument < 16)
                         ? OPLL_PATCH_NAMES[s->current_instrument] : "Unknown";
     int active = 0;
@@ -309,26 +319,92 @@ static int ym2413_json_status(void *state, char *buf, int max) {
     return snprintf(buf, (size_t)max,
         "\"instrument_type\":\"ym2413\","
         "\"preset_index\":%d,\"preset_name\":\"%s\","
-        "\"rhythm_mode\":%d,\"active_voices\":%d",
-        s->current_instrument, iname, s->rhythm_mode, active);
+        "\"rhythm_mode\":%d,\"active_voices\":%d,\"volume\":%.4f,"
+        "\"feedback\":%d,"
+        "\"mod_mult\":%d,\"mod_am\":%d,\"mod_vibrato\":%d,"
+        "\"mod_eg\":%d,\"mod_ksr\":%d,\"mod_tl\":%d,\"mod_ksl\":%d,"
+        "\"mod_wave\":%d,\"mod_attack\":%d,\"mod_decay\":%d,"
+        "\"mod_sustain\":%d,\"mod_release\":%d,"
+        "\"car_mult\":%d,\"car_am\":%d,\"car_vibrato\":%d,"
+        "\"car_eg\":%d,\"car_ksr\":%d,\"car_ksl\":%d,"
+        "\"car_wave\":%d,\"car_attack\":%d,\"car_decay\":%d,"
+        "\"car_sustain\":%d,\"car_release\":%d",
+        s->current_instrument, iname, s->rhythm_mode, active, (double)s->volume,
+        r[0x03] & 0x07,
+        r[0x00] & 0x0F, (r[0x00] >> 7) & 1, (r[0x00] >> 6) & 1,
+        (r[0x00] >> 5) & 1, (r[0x00] >> 4) & 1, r[0x02] & 0x3F, (r[0x02] >> 6) & 3,
+        (r[0x03] >> 3) & 1, (r[0x04] >> 4) & 0x0F, r[0x04] & 0x0F,
+        (r[0x06] >> 4) & 0x0F, r[0x06] & 0x0F,
+        r[0x01] & 0x0F, (r[0x01] >> 7) & 1, (r[0x01] >> 6) & 1,
+        (r[0x01] >> 5) & 1, (r[0x01] >> 4) & 1, (r[0x03] >> 6) & 3,
+        (r[0x03] >> 4) & 1, (r[0x05] >> 4) & 0x0F, r[0x05] & 0x0F,
+        (r[0x07] >> 4) & 0x0F, r[0x07] & 0x0F);
 }
 
 /* ── json_save / json_load ────────────────────────────────────────────── */
 
 static int ym2413_json_save(void *state, char *buf, int max) {
     YM2413State *s = (YM2413State *)state;
+
+    /* If using a ROM patch, dump its values so they survive save/load.
+     * ROM patches aren't reflected in registers 0x00-0x07. */
+    e_uint8 regbuf[16]; /* patch2dump writes up to 14 bytes */
+    if (s->current_instrument > 0) {
+        OPLL_PATCH pair[2];
+        OPLL_getDefaultPatch(OPLL_2413_TONE, s->current_instrument, pair);
+        memset(regbuf, 0, sizeof(regbuf));
+        OPLL_patch2dump(pair, regbuf);
+    } else {
+        for (int i = 0; i < 8; i++) regbuf[i] = s->opll->reg[i];
+    }
+    e_uint8 *r = regbuf;
     return snprintf(buf, (size_t)max,
-        "\"instrument\":%d,\"rhythm\":%d",
-        s->current_instrument, s->rhythm_mode);
+        "\"instrument\":%d,\"rhythm\":%d,\"volume\":%.4f,"
+        "\"feedback\":%d,"
+        "\"mod_mult\":%d,\"mod_am\":%d,\"mod_vibrato\":%d,"
+        "\"mod_eg\":%d,\"mod_ksr\":%d,\"mod_tl\":%d,\"mod_ksl\":%d,"
+        "\"mod_wave\":%d,\"mod_attack\":%d,\"mod_decay\":%d,"
+        "\"mod_sustain\":%d,\"mod_release\":%d,"
+        "\"car_mult\":%d,\"car_am\":%d,\"car_vibrato\":%d,"
+        "\"car_eg\":%d,\"car_ksr\":%d,\"car_ksl\":%d,"
+        "\"car_wave\":%d,\"car_attack\":%d,\"car_decay\":%d,"
+        "\"car_sustain\":%d,\"car_release\":%d",
+        s->current_instrument, s->rhythm_mode, (double)s->volume,
+        r[0x03] & 0x07,
+        r[0x00] & 0x0F, (r[0x00] >> 7) & 1, (r[0x00] >> 6) & 1,
+        (r[0x00] >> 5) & 1, (r[0x00] >> 4) & 1, r[0x02] & 0x3F, (r[0x02] >> 6) & 3,
+        (r[0x03] >> 3) & 1, (r[0x04] >> 4) & 0x0F, r[0x04] & 0x0F,
+        (r[0x06] >> 4) & 0x0F, r[0x06] & 0x0F,
+        r[0x01] & 0x0F, (r[0x01] >> 7) & 1, (r[0x01] >> 6) & 1,
+        (r[0x01] >> 5) & 1, (r[0x01] >> 4) & 1, (r[0x03] >> 6) & 3,
+        (r[0x03] >> 4) & 1, (r[0x05] >> 4) & 0x0F, r[0x05] & 0x0F,
+        (r[0x07] >> 4) & 0x0F, r[0x07] & 0x0F);
 }
 
 static int ym2413_json_load(void *state, const char *json) {
     YM2413State *s = (YM2413State *)state;
     int ival;
+    float fval;
     if (json_get_int(json, "instrument", &ival) == 0 && ival >= 0 && ival < 16)
         s->current_instrument = ival;
     if (json_get_int(json, "rhythm", &ival) == 0)
         s->rhythm_mode = ival ? 1 : 0;
+    if (json_get_float(json, "volume", &fval) == 0)
+        s->volume = fval;
+
+    /* Restore custom patch registers */
+    const char *params[] = {
+        "feedback", "mod_mult", "mod_am", "mod_vibrato", "mod_eg", "mod_ksr",
+        "mod_tl", "mod_ksl", "mod_wave", "mod_attack", "mod_decay",
+        "mod_sustain", "mod_release",
+        "car_mult", "car_am", "car_vibrato", "car_eg", "car_ksr", "car_ksl",
+        "car_wave", "car_attack", "car_decay", "car_sustain", "car_release",
+        NULL
+    };
+    for (int i = 0; params[i]; i++) {
+        if (json_get_int(json, params[i], &ival) == 0)
+            ym2413_set_param(state, params[i], (float)ival);
+    }
     return 0;
 }
 
@@ -346,7 +422,7 @@ static void ym2413_set_param(void *state, const char *name, float value) {
             if (iv > 0) {
                 OPLL_PATCH pair[2]; /* [0]=mod, [1]=car */
                 OPLL_getDefaultPatch(OPLL_2413_TONE, iv, pair);
-                e_uint8 dump[8];
+                e_uint8 dump[16];
                 OPLL_patch2dump(pair, dump);
                 for (int r = 0; r < 8; r++)
                     OPLL_writeReg(s->opll, (e_uint32)r, dump[r]);
