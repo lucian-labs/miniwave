@@ -141,12 +141,27 @@ static void deferred_free_push(void *ptr, void (*destroy)(void *)) {
  * deferred_free_drain waits for readers to clear before freeing. */
 static _Atomic int g_slot_readers = 0;
 
-static inline void slot_read_begin(void) { atomic_fetch_add(&g_slot_readers, 1); }
-static inline void slot_read_end(void)   { atomic_fetch_sub(&g_slot_readers, 1); }
+/* Debug counters — zero-cost when not logging */
+static _Atomic uint64_t g_slot_read_enters = 0;
+static _Atomic uint64_t g_slot_read_exits = 0;
+static _Atomic uint64_t g_deferred_free_delayed = 0;
+static _Atomic uint64_t g_deferred_free_drained = 0;
+
+static inline void slot_read_begin(void) {
+    atomic_fetch_add(&g_slot_readers, 1);
+    atomic_fetch_add(&g_slot_read_enters, 1);
+}
+static inline void slot_read_end(void) {
+    atomic_fetch_sub(&g_slot_readers, 1);
+    atomic_fetch_add(&g_slot_read_exits, 1);
+}
 
 static void deferred_free_drain(void) {
-    /* Don't free while HTTP handlers are reading slot state */
-    if (atomic_load(&g_slot_readers) > 0) return;
+    /* Don't free while any reader (HTTP/SSE/OSC/MIDI) is active */
+    if (atomic_load(&g_slot_readers) > 0) {
+        atomic_fetch_add(&g_deferred_free_delayed, 1);
+        return;
+    }
 
     int count = atomic_exchange(&g_deferred_free_count, 0);
     for (int i = 0; i < count && i < DEFERRED_FREE_MAX; i++) {
@@ -156,6 +171,7 @@ static void deferred_free_drain(void) {
             free(df->ptr);
             df->ptr = NULL;
             df->destroy = NULL;
+            atomic_fetch_add(&g_deferred_free_drained, 1);
         }
     }
 }
@@ -261,6 +277,18 @@ static int rack_set_slot(int channel, const char *type_name) {
     atomic_store(&slot->active, 0);
     atomic_fetch_add(&slot->gen, 1);
 
+    /* Wait for in-flight readers to finish.
+     * Readers (HTTP/SSE/OSC/MIDI) check active before dereferencing.
+     * Once active=0, no new readers enter. Wait for existing ones. */
+    int wait_us = 0;
+    while (atomic_load(&g_slot_readers) > 0 && wait_us < 100000) {
+        usleep(1000);
+        wait_us += 1000;
+    }
+    /* Also wait one audio buffer cycle so render_mix finishes any
+     * in-flight render that snapshotted state before active=0 */
+    usleep(25000); /* ~1 buffer at 48kHz/1024 */
+
     /* Capture old slot-level seq/keyseq */
     MiniSeq *old_seq = slot->seq;
     KeySeq  *old_keyseq = slot->keyseq;
@@ -313,6 +341,10 @@ static void rack_clear_slot(int channel) {
 
     atomic_store(&slot->active, 0);
     atomic_fetch_add(&slot->gen, 1);
+
+    /* Wait for readers + one render cycle */
+    { int wu = 0; while (atomic_load(&g_slot_readers) > 0 && wu < 100000) { usleep(1000); wu += 1000; } }
+    usleep(25000);
 
     MiniSeq *old_seq = slot->seq;
     KeySeq  *old_keyseq = slot->keyseq;
@@ -510,10 +542,11 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
     int ch = status & 0x0F;
     if (ch < 0 || ch >= MAX_SLOTS) return;
 
+    slot_read_begin();
     RackSlot *slot = &g_rack.slots[ch];
-    if (!atomic_load(&slot->active)) return;
+    if (!atomic_load(&slot->active)) { slot_read_end(); return; }
     void *st = slot->state;
-    if (!st) return;
+    if (!st) { slot_read_end(); return; }
     InstrumentType *itype = g_type_registry[slot->type_idx];
 
     uint8_t type = status & 0xF0;
@@ -526,12 +559,12 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
         if (type == 0x90 && d2 > 0) {
             if (keyseq_note_on(ks, d1, d2)) {
                 if (g_midi_broadcast) g_midi_broadcast(ch, d1, d2, 1);
-                return;
+                slot_read_end(); return;
             }
         } else if (type == 0x80 || (type == 0x90 && d2 == 0)) {
             if (keyseq_note_off(ks, d1)) {
                 if (g_midi_broadcast) g_midi_broadcast(ch, d1, 0, 0);
-                return;
+                slot_read_end(); return;
             }
         }
     }
@@ -557,6 +590,7 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
         state_mark_dirty();
         break;
     }
+    slot_read_end();
 }
 
 /* ── Render Mixer ──────────────────────────────────────────────────── */
@@ -586,17 +620,21 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
 
         InstrumentType *itype = g_type_registry[slot->type_idx];
 
+        /* Snapshot seq/keyseq pointers — stable for this render cycle */
+        MiniSeq *s_seq = slot->seq;
+        KeySeq  *s_ks  = slot->keyseq;
+
         /* Tick slot-level seq/keyseq per-sample before rendering.
          * Events fire at buffer boundaries (acceptable latency). */
         float tick_dt = 1.0f / (float)sample_rate;
         for (int si = 0; si < frames; si++) {
-            if (slot->seq) seq_tick(slot->seq, tick_dt);
-            if (slot->keyseq) keyseq_tick(slot->keyseq, tick_dt);
+            if (s_seq) seq_tick(s_seq, tick_dt);
+            if (s_ks)  keyseq_tick(s_ks, tick_dt);
         }
 
         /* Copy slot keyseq cents_mod → instrument's cents_mod field */
-        if (slot->keyseq) {
-            slot->cents_mod = slot->keyseq->cents_mod;
+        if (s_ks) {
+            slot->cents_mod = s_ks->cents_mod;
             if (strcmp(itype->name, "fm-synth") == 0) ((FMSynth *)st)->cents_mod = slot->cents_mod;
             else if (strcmp(itype->name, "sub-synth") == 0) ((SubSynth *)st)->cents_mod = slot->cents_mod;
             else if (strcmp(itype->name, "ym2413") == 0) ((YM2413State *)st)->cents_mod = slot->cents_mod;

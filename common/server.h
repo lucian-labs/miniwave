@@ -1080,6 +1080,19 @@ static void http_handle_api(int fd, const char *body) {
         fprintf(stderr, "[miniwave] PANIC — all notes off, all keyseqs stopped\n");
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
+    else if (strcmp(type_str, "debug_lifetime") == 0) {
+        rlen = snprintf(resp, sizeof(resp),
+            "{\"slot_readers\":%d,"
+            "\"read_enters\":%llu,\"read_exits\":%llu,"
+            "\"deferred_queued\":%d,"
+            "\"deferred_delayed\":%llu,\"deferred_drained\":%llu}",
+            atomic_load(&g_slot_readers),
+            (unsigned long long)atomic_load(&g_slot_read_enters),
+            (unsigned long long)atomic_load(&g_slot_read_exits),
+            atomic_load(&g_deferred_free_count),
+            (unsigned long long)atomic_load(&g_deferred_free_delayed),
+            (unsigned long long)atomic_load(&g_deferred_free_drained));
+    }
     else {
         rlen = snprintf(resp, sizeof(resp), "{\"error\":\"unknown type: %s\"}", type_str);
     }
@@ -1683,6 +1696,7 @@ static void *osc_thread_fn(void *arg) {
                 const char *sub_path = end;
                 RackSlot *slot = &g_rack.slots[ch];
 
+                slot_read_begin();
                 if (slot->active && slot->state) {
                     if (strcmp(sub_path, "/status") == 0) {
                         InstrumentType *itype = g_type_registry[slot->type_idx];
@@ -1693,7 +1707,6 @@ static void *osc_thread_fn(void *arg) {
                                    (struct sockaddr *)&sender, sender_len);
                         }
                     } else if (strncmp(sub_path, "/seq/", 5) == 0 || strcmp(sub_path, "/seq") == 0) {
-                        /* Route seq paths to slot-level seq */
                         if (slot->seq) seq_osc_handle(slot->seq, sub_path, arg_i, ai, arg_f, afi);
                     } else {
                         InstrumentType *itype = g_type_registry[slot->type_idx];
@@ -1701,6 +1714,7 @@ static void *osc_thread_fn(void *arg) {
                                           arg_i, ai, arg_f, afi);
                     }
                 }
+                slot_read_end();
             }
         }
     }
