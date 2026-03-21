@@ -388,37 +388,11 @@ typedef struct {
  *  KeySeq struct
  * ══════════════════════════════════════════════════════════════════════════ */
 
-typedef struct KeySeq {
-    /* Offsets mode */
-    int   offsets[KEYSEQ_MAX_STEPS];
-    float levels[KEYSEQ_MAX_STEPS];
-    int   num_steps;
+#define KEYSEQ_MAX_VOICES 8
 
-    /* Shared params */
-    float step_beats;
-    float gate_beats;
-    int   enabled;
-    int   gated;
-    int   loop;
-
-    /* Algo mode */
-    int        algo_mode;
-    KeySeqExpr expr_n, expr_v, expr_t, expr_g;
-
-    /* Per-frame note modulation (noteAlgo) */
-    KeySeqExpr expr_frame;     /* evaluated per sample, returns cents offset */
-    float      cents_mod;      /* current output — instruments read this */
-
-    /* End condition */
-    KeySeqExpr expr_end;       /* evaluated per step, nonzero = stop */
-
-    /* Param bus */
-    KeySeqParam params[KEYSEQ_MAX_PARAMS];
-    int         num_params;
-
-    /* Runtime */
-    int   firing;
-    int   playing;
+/* Per-voice runtime state (one per held note) */
+typedef struct {
+    int   active;
     int   root_note;
     float root_velocity;
     int   current_step;
@@ -426,7 +400,6 @@ typedef struct KeySeq {
     float gate_elapsed;
     int   last_played_note;
     int   gate_open;
-    float bpm;
     int   root_held;
 
     /* Running algo state */
@@ -436,17 +409,47 @@ typedef struct KeySeq {
     float note_time;
     float total_time;
 
-    /* Noise/rand seed — per-instance, no global state mutation */
-    KeySeqExpr expr_seed;       /* evaluated at note-on, result → noise domain offset */
-    uint32_t runtime_seed;      /* active seed for current note */
-    uint32_t rand_state;        /* per-keyseq PRNG state */
-    fnl_state fnl;              /* per-keyseq noise state */
+    /* Per-voice RNG/noise */
+    uint32_t runtime_seed;
+    uint32_t rand_state;
+    fnl_state fnl;
+} KeySeqVoice;
+
+typedef struct KeySeq {
+    /* Definition — shared across all voices */
+    int   offsets[KEYSEQ_MAX_STEPS];
+    float levels[KEYSEQ_MAX_STEPS];
+    int   num_steps;
+
+    float step_beats;
+    float gate_beats;
+    int   enabled;
+    int   gated;
+    int   loop;
+
+    int        algo_mode;
+    KeySeqExpr expr_n, expr_v, expr_t, expr_g;
+    KeySeqExpr expr_frame;
+    KeySeqExpr expr_end;
+    KeySeqExpr expr_seed;
+
+    /* Param bus */
+    KeySeqParam params[KEYSEQ_MAX_PARAMS];
+    int         num_params;
+
+    /* Voice pool */
+    KeySeqVoice voices[KEYSEQ_MAX_VOICES];
+
+    /* Aggregate output */
+    float      cents_mod;      /* from most recent voice, instruments read this */
+    int        firing;         /* reentrancy guard */
+    float      bpm;
 
     /* Callbacks */
     void   *inst_state;
     void  (*midi_fn)(void *, uint8_t, uint8_t, uint8_t);
     void  (*param_fn)(void *state, const char *param_name, float value);
-    void  (*graph_fn)(const char *json, int len);  /* broadcast step graph on trigger */
+    void  (*graph_fn)(const char *json, int len);
     uint8_t midi_channel;
 
     char  source[512];
@@ -461,12 +464,9 @@ static void keyseq_init(KeySeq *ks) {
     memset(ks, 0, sizeof(KeySeq));
     ks->step_beats = 0.125f;
     ks->bpm = 120.0f;
-    ks->last_played_note = -1;
     ks->graph_fn = g_keyseq_graph_fn;
-    ks->rand_state = 1;
-    ks->fnl = fnlCreateState();
-    ks->fnl.noise_type = FNL_NOISE_PERLIN;
-    ks->fnl.frequency = 1.0f;
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        ks->voices[i].last_played_note = -1;
 }
 
 static void keyseq_bind(KeySeq *ks, void *inst_state,
@@ -505,19 +505,9 @@ static void keyseq_fire_params_frame(KeySeq *ks, const KeySeqCtx *ctx) {
 
 static inline void keyseq_fire_on(KeySeq *ks, int note, int vel) {
     if (!ks->midi_fn || note < 0 || note > 127) return;
-    /* Always release previous note before firing new one */
-    if (ks->last_played_note >= 0) {
-        ks->firing = 1;
-        ks->midi_fn(ks->inst_state, (uint8_t)(0x80 | ks->midi_channel),
-                    (uint8_t)ks->last_played_note, 0);
-        ks->firing = 0;
-    }
     ks->firing = 1;
     ks->midi_fn(ks->inst_state, (uint8_t)(0x90 | ks->midi_channel), (uint8_t)note, (uint8_t)vel);
     ks->firing = 0;
-    ks->last_played_note = note;
-    ks->gate_open = 1;
-    ks->note_time = 0.0f;
 }
 
 static inline void keyseq_fire_off(KeySeq *ks, int note) {
@@ -525,8 +515,10 @@ static inline void keyseq_fire_off(KeySeq *ks, int note) {
     ks->firing = 1;
     ks->midi_fn(ks->inst_state, (uint8_t)(0x80 | ks->midi_channel), (uint8_t)note, 0);
     ks->firing = 0;
-    if (ks->last_played_note == note) { ks->last_played_note = -1; ks->gate_open = 0; }
 }
+
+/* Forward decls for voice management */
+static void keyseq_stop_voice(KeySeq *ks, int vi);
 
 /* ── Parse DSL ── */
 
@@ -538,12 +530,12 @@ static int keyseq_parse(KeySeq *ks, const char *dsl) {
     uint8_t saved_ch = ks->midi_channel;
     float saved_bpm = ks->bpm;
 
-    if (ks->playing && ks->last_played_note >= 0)
-        keyseq_fire_off(ks, ks->last_played_note);
+    /* Stop all active voices before re-parsing */
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        if (ks->voices[i].active) keyseq_stop_voice(ks, i);
 
     memset(ks, 0, sizeof(KeySeq));
     ks->step_beats = 0.125f;
-    ks->last_played_note = -1;
     ks->enabled = 1;
     ks->inst_state = saved_state;
     ks->midi_fn = saved_fn;
@@ -551,11 +543,8 @@ static int keyseq_parse(KeySeq *ks, const char *dsl) {
     ks->graph_fn = saved_gfn;
     ks->midi_channel = saved_ch;
     ks->bpm = saved_bpm;
-    /* Restore per-instance noise state */
-    ks->fnl = fnlCreateState();
-    ks->fnl.noise_type = FNL_NOISE_PERLIN;
-    ks->fnl.frequency = 1.0f;
-    ks->rand_state = 1;
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        ks->voices[i].last_played_note = -1;
 
     if (!dsl || !*dsl) { ks->enabled = 0; return 0; }
     strncpy(ks->source, dsl, sizeof(ks->source) - 1);
@@ -674,204 +663,198 @@ static int keyseq_parse(KeySeq *ks, const char *dsl) {
     return ks->algo_mode ? 1 : ks->num_steps;
 }
 
+/* ── Voice helpers ── */
+
+static int keyseq_find_voice(KeySeq *ks, int root_note) {
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        if (ks->voices[i].active && ks->voices[i].root_note == root_note) return i;
+    return -1;
+}
+
+static void keyseq_stop_voice(KeySeq *ks, int vi) {
+    KeySeqVoice *v = &ks->voices[vi];
+    if (v->last_played_note >= 0) keyseq_fire_off(ks, v->last_played_note);
+    v->active = 0;
+}
+
 /* ── Trigger ── */
 
 static int keyseq_note_on(KeySeq *ks, int note, int velocity) {
     if (!ks->enabled || (ks->num_steps == 0 && !ks->algo_mode)) return 0;
 
-    if (ks->playing && ks->last_played_note >= 0)
-        keyseq_fire_off(ks, ks->last_played_note);
+    /* If this note already has a voice, stop it */
+    int existing = keyseq_find_voice(ks, note);
+    if (existing >= 0) keyseq_stop_voice(ks, existing);
 
-    ks->root_note = note;
-    ks->root_velocity = (float)velocity / 127.0f;
-    ks->current_step = 0;
-    ks->step_elapsed = 0.0f;
-    ks->gate_elapsed = 0.0f;
-    ks->note_time = 0.0f;
-    ks->total_time = 0.0f;
-    ks->playing = 1;
-    ks->root_held = 1;
-    ks->cents_mod = 0.0f;
+    /* Allocate a voice */
+    int vi = -1;
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        if (!ks->voices[i].active) { vi = i; break; }
+    if (vi < 0) { keyseq_stop_voice(ks, 0); vi = 0; } /* steal oldest */
 
-    /* Evaluate seed expression or use wall-clock time */
+    KeySeqVoice *v = &ks->voices[vi];
+    memset(v, 0, sizeof(*v));
+    v->active = 1;
+    v->root_note = note;
+    v->root_velocity = (float)velocity / 127.0f;
+    v->last_played_note = -1;
+    v->root_held = 1;
+    v->algo_n = (float)note;
+    v->algo_v = v->root_velocity;
+    v->algo_t = ks->step_beats;
+    v->algo_g = ks->gate_beats;
+
+    /* Seed */
     if (ks->expr_seed.valid) {
-        KeySeqCtx sc = {
-            .n = (float)note, .v = (float)velocity,
-            .rv = ks->root_velocity, .root = (float)note,
-            .i = 0, .time = 0, .gate = 0, .held = 1.0f
-        };
+        KeySeqCtx sc = { .n=(float)note, .v=(float)velocity, .rv=v->root_velocity,
+                         .root=(float)note, .gate=1, .held=1 };
         float sv = ke_eval(&ks->expr_seed, &sc);
-        /* Hash the float into a well-distributed seed.
-         * fmodf keeps it in range before cast to avoid uint32 overflow. */
         float hf = fmodf(fabsf(sv) * 2654435.761f, 4294967000.0f);
-        uint32_t raw = (uint32_t)hf;
-        ks->runtime_seed = raw ? raw : 1;
+        v->runtime_seed = (uint32_t)hf; if (!v->runtime_seed) v->runtime_seed = 1;
     } else {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        ks->runtime_seed = (uint32_t)(ts.tv_nsec ^ (ts.tv_sec * 1000003)) | 1;
+        struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+        v->runtime_seed = (uint32_t)(ts.tv_nsec ^ (ts.tv_sec * 1000003)) | 1;
     }
-    ks->rand_state = ks->runtime_seed;
-    ks->fnl.seed = (int)ks->runtime_seed;
+    v->rand_state = v->runtime_seed;
+    v->fnl = fnlCreateState();
+    v->fnl.noise_type = FNL_NOISE_PERLIN;
+    v->fnl.frequency = 1.0f;
+    v->fnl.seed = (int)v->runtime_seed;
 
-    ks->algo_n = (float)note;
-    ks->algo_v = ks->root_velocity;
-    ks->algo_t = ks->step_beats;
-    ks->algo_g = ks->gate_beats;
+    fprintf(stderr, "[keyseq] trigger note=%d vel=%d voice=%d seed=%u\n",
+            note, velocity, vi, v->runtime_seed);
 
-    fprintf(stderr, "[keyseq] trigger note=%d vel=%d seed=%u (%s) | n=%.2f v=%.4f t=%.3f g=%.3f gated=%d\n",
-            note, velocity, ks->runtime_seed,
-            ks->expr_seed.valid ? "expr" : "auto",
-            ks->algo_n, ks->algo_v, ks->algo_t, ks->algo_g, ks->gated);
-    fprintf(stderr, "[keyseq]   %s\n", ks->source);
-
+    /* Step 0 = root note */
+    int target;
     if (ks->algo_mode) {
-        /* Step 0 = root note, algo starts at step 1 */
-        int vel = (int)(ks->root_velocity * 127.0f);
-        keyseq_fire_on(ks, note, vel > 0 ? vel : 1);
+        target = note;
+        int vel = (int)(v->root_velocity * 127.0f);
+        keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
     } else {
-        int target = note + ks->offsets[0];
+        target = note + ks->offsets[0];
         if (target < 0) target = 0; if (target > 127) target = 127;
-        int vel = (int)(ks->root_velocity * ks->levels[0] * 127.0f);
+        int vel = (int)(v->root_velocity * ks->levels[0] * 127.0f);
         keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
     }
+    v->last_played_note = target;
+    v->gate_open = 1;
 
-    /* Broadcast step graph if callback is set */
     if (ks->graph_fn) ks->graph_fn(ks->source, (int)strlen(ks->source));
-
     return 1;
 }
 
 /* ── Release ── */
 
 static int keyseq_note_off(KeySeq *ks, int note) {
-    if (!ks->enabled || !ks->playing) return 0;
-    if (note != ks->root_note) return 0;
-    ks->root_held = 0;
+    if (!ks->enabled) return 0;
+    int vi = keyseq_find_voice(ks, note);
+    if (vi < 0) return 0;
 
-    if (ks->gated) {
-        if (ks->last_played_note >= 0) keyseq_fire_off(ks, ks->last_played_note);
-        ks->playing = 0;
-        ks->cents_mod = 0.0f;
-        return 1;
-    }
+    ks->voices[vi].root_held = 0;
+    if (ks->gated) { keyseq_stop_voice(ks, vi); return 1; }
     return 0;
 }
 
-/* ── Tick (per sample) ── */
+/* ── Tick one voice ── */
 
-static void keyseq_tick(KeySeq *ks, float dt) {
-    if (!ks->playing) return;
+static void keyseq_tick_voice(KeySeq *ks, KeySeqVoice *v, float dt) {
+    if (!v->active) return;
 
-    ks->total_time += dt;
-    ks->note_time += dt;
+    v->total_time += dt;
+    v->note_time += dt;
 
-    float step_sec = (ks->algo_mode ? ks->algo_t : ks->step_beats) * 60.0f / ks->bpm;
-    float gate_ratio = ks->algo_mode ? ks->algo_g : ks->gate_beats;
-    float gate_sec = step_sec * gate_ratio;
+    float step_sec = (ks->algo_mode ? v->algo_t : ks->step_beats) * 60.0f / ks->bpm;
+    float gate_sec = step_sec * (ks->algo_mode ? v->algo_g : ks->gate_beats);
 
-    ks->step_elapsed += dt;
-    ks->gate_elapsed += dt;
+    v->step_elapsed += dt;
+    v->gate_elapsed += dt;
 
-    /* Per-frame modulation (cents + params) */
-    if (ks->gate_open && (ks->expr_frame.valid || ks->num_params > 0)) {
-        float bu_val = (step_sec > 0) ? ks->step_elapsed / step_sec : 0.0f;
+    /* Per-frame modulation */
+    if (v->gate_open && ks->expr_frame.valid) {
+        float bu = (step_sec > 0) ? v->step_elapsed / step_sec : 0;
         KeySeqCtx fc = {
-            .n = (float)ks->last_played_note, .v = ks->algo_v,
-            .t = ks->algo_t, .g = ks->algo_g,
-            .i = (float)ks->current_step, .root = (float)ks->root_note,
-            .rv = ks->root_velocity,
-            .time = ks->note_time, .bu = bu_val,
-            .gate = (gate_sec > 0) ? ks->gate_elapsed / gate_sec : 0,
-            .held = ks->root_held ? 1.0f : 0.0f,
-            .dt = dt, .seed = (float)ks->runtime_seed,
-            .local_rand = &ks->rand_state, .local_fnl = &ks->fnl
+            .n=(float)v->last_played_note, .v=v->algo_v, .t=v->algo_t, .g=v->algo_g,
+            .i=(float)v->current_step, .root=(float)v->root_note, .rv=v->root_velocity,
+            .time=v->note_time, .bu=bu,
+            .gate=(gate_sec>0)?v->gate_elapsed/gate_sec:0,
+            .held=v->root_held?1.0f:0.0f, .dt=dt,
+            .seed=(float)v->runtime_seed,
+            .local_rand=&v->rand_state, .local_fnl=&v->fnl
         };
-        if (ks->expr_frame.valid)
-            ks->cents_mod = ke_eval(&ks->expr_frame, &fc);
-        keyseq_fire_params_frame(ks, &fc);
-    } else if (!ks->gate_open) {
-        ks->cents_mod = 0.0f;
+        ks->cents_mod = ke_eval(&ks->expr_frame, &fc);
     }
 
     /* Gate off */
-    if (ks->gate_open && ks->gate_elapsed >= gate_sec) {
-        if (ks->last_played_note >= 0) keyseq_fire_off(ks, ks->last_played_note);
+    if (v->gate_open && v->gate_elapsed >= gate_sec) {
+        if (v->last_played_note >= 0) keyseq_fire_off(ks, v->last_played_note);
+        v->gate_open = 0;
     }
 
     /* Step advance */
-    if (ks->step_elapsed >= step_sec) {
-        ks->step_elapsed -= step_sec;
-        ks->gate_elapsed = 0.0f;
-        ks->current_step++;
+    if (v->step_elapsed < step_sec) return;
+    v->step_elapsed -= step_sec;
+    v->gate_elapsed = 0.0f;
+    v->current_step++;
 
-        if (ks->algo_mode) {
-            float bu_val = 0.0f;
-            KeySeqCtx ctx = {
-                .n = ks->algo_n, .v = ks->algo_v,
-                .t = ks->algo_t, .g = ks->algo_g,
-                .i = (float)ks->current_step, .root = (float)ks->root_note,
-                .rv = ks->root_velocity,
-                .time = ks->total_time, .bu = bu_val,
-                .gate = ks->root_held ? 1.0f : 0.0f, .held = ks->root_held ? 1.0f : 0.0f,
-                .seed = (float)ks->runtime_seed,
-                .local_rand = &ks->rand_state, .local_fnl = &ks->fnl
-            };
-            float new_n = ks->expr_n.valid ? ke_eval(&ks->expr_n, &ctx) : ctx.n;
-            float new_v = ks->expr_v.valid ? ke_eval(&ks->expr_v, &ctx) : ctx.v;
-            float new_t = ks->expr_t.valid ? ke_eval(&ks->expr_t, &ctx) : ctx.t;
-            float new_g = ks->expr_g.valid ? ke_eval(&ks->expr_g, &ctx) : ctx.g;
+    if (ks->algo_mode) {
+        KeySeqCtx ctx = {
+            .n=v->algo_n, .v=v->algo_v, .t=v->algo_t, .g=v->algo_g,
+            .i=(float)v->current_step, .root=(float)v->root_note, .rv=v->root_velocity,
+            .time=v->total_time,
+            .gate=v->root_held?1.0f:0.0f, .held=v->root_held?1.0f:0.0f,
+            .seed=(float)v->runtime_seed,
+            .local_rand=&v->rand_state, .local_fnl=&v->fnl
+        };
+        if (ks->expr_n.valid) v->algo_n = ke_eval(&ks->expr_n, &ctx);
+        if (ks->expr_v.valid) v->algo_v = ke_eval(&ks->expr_v, &ctx);
+        if (ks->expr_t.valid) { float t=ke_eval(&ks->expr_t,&ctx); v->algo_t=t>0.001f?t:0.001f; }
+        if (ks->expr_g.valid) { float g=ke_eval(&ks->expr_g,&ctx); v->algo_g=g>0.001f?g:0.001f; }
 
-            ks->algo_n = new_n; ks->algo_v = new_v;
-            ks->algo_t = new_t > 0.001f ? new_t : 0.001f;
-            ks->algo_g = new_g > 0.001f ? new_g : 0.001f;
-
-            /* End condition */
-            if (ks->expr_end.valid) {
-                /* Re-evaluate with updated state */
-                ctx.n = ks->algo_n; ctx.v = ks->algo_v;
-                ctx.t = ks->algo_t; ctx.g = ks->algo_g;
-                float end_val = ke_eval(&ks->expr_end, &ctx);
-                if (end_val != 0.0f) {
-                    fprintf(stderr, "[keyseq]   end @ step %d (n=%.2f v=%.4f)\n",
-                            ks->current_step, ks->algo_n, ks->algo_v);
-                    if (ks->last_played_note >= 0) keyseq_fire_off(ks, ks->last_played_note);
-                    ks->playing = 0; ks->cents_mod = 0; return;
-                }
-            } else if (ks->algo_v <= KE_EPSILON) {
-                /* Default: stop on velocity death */
-                if (ks->last_played_note >= 0) keyseq_fire_off(ks, ks->last_played_note);
-                ks->playing = 0; ks->cents_mod = 0; return;
+        /* End condition */
+        if (ks->expr_end.valid) {
+            ctx.n=v->algo_n; ctx.v=v->algo_v; ctx.t=v->algo_t; ctx.g=v->algo_g;
+            if (ke_eval(&ks->expr_end, &ctx) != 0.0f) {
+                if (v->last_played_note >= 0) keyseq_fire_off(ks, v->last_played_note);
+                v->active = 0; return;
             }
-
-            int target = (int)roundf(ks->algo_n);
-            if (target < 0) target = 0; if (target > 127) target = 127;
-            /* Fractional n → cents detune */
-            ks->cents_mod = (ks->algo_n - (float)target) * 100.0f;
-            int vel = (int)(ks->algo_v * 127.0f);
-            fprintf(stderr, "[keyseq]   step %d: n=%.2f(%d) v=%.4f t=%.3f g=%.3f cents=%.1f\n",
-                    ks->current_step, ks->algo_n, target, ks->algo_v,
-                    ks->algo_t, ks->algo_g, ks->cents_mod);
-            keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
-            keyseq_fire_params_step(ks, &ctx);
-        } else {
-            if (ks->current_step >= ks->num_steps) {
-                if (ks->loop) ks->current_step = 0;
-                else { ks->playing = 0; ks->cents_mod = 0; return; }
-            }
-            int target = ks->root_note + ks->offsets[ks->current_step];
-            if (target < 0) target = 0; if (target > 127) target = 127;
-            int vel = (int)(ks->root_velocity * ks->levels[ks->current_step] * 127.0f);
-            keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
+        } else if (v->algo_v <= KE_EPSILON) {
+            if (v->last_played_note >= 0) keyseq_fire_off(ks, v->last_played_note);
+            v->active = 0; return;
         }
+
+        int target = (int)roundf(v->algo_n);
+        if (target < 0) target = 0; if (target > 127) target = 127;
+        ks->cents_mod = (v->algo_n - (float)target) * 100.0f;
+        int vel = (int)(v->algo_v * 127.0f);
+        keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
+        v->last_played_note = target;
+        v->gate_open = 1;
+    } else {
+        if (v->current_step >= ks->num_steps) {
+            if (ks->loop) v->current_step = 0;
+            else { v->active = 0; return; }
+        }
+        int target = v->root_note + ks->offsets[v->current_step];
+        if (target < 0) target = 0; if (target > 127) target = 127;
+        int vel = (int)(v->root_velocity * ks->levels[v->current_step] * 127.0f);
+        keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
+        v->last_played_note = target;
+        v->gate_open = 1;
     }
+}
+
+/* ── Tick all voices ── */
+
+static void keyseq_tick(KeySeq *ks, float dt) {
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        keyseq_tick_voice(ks, &ks->voices[i], dt);
 }
 
 /* ── Stop ── */
 
 static void keyseq_stop(KeySeq *ks) {
-    if (ks->last_played_note >= 0) keyseq_fire_off(ks, ks->last_played_note);
-    ks->playing = 0;
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        if (ks->voices[i].active) keyseq_stop_voice(ks, i);
     ks->cents_mod = 0.0f;
 }
 

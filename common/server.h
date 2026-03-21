@@ -716,6 +716,20 @@ static void http_handle_api(int fd, const char *body) {
         }
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
+    else if (strcmp(type_str, "keyseq_enable") == 0) {
+        int ch = 0, en = 1;
+        json_get_int(body, "channel", &ch);
+        json_get_int(body, "enabled", &en);
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            if (slot->keyseq) {
+                slot->keyseq->enabled = en ? 1 : 0;
+                if (!en) keyseq_stop(slot->keyseq);
+                sse_mark_dirty();
+            }
+        }
+        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+    }
     else if (strcmp(type_str, "keyseq_spec") == 0) {
         int ch = -1;
         json_get_int(body, "channel", &ch);
@@ -911,13 +925,16 @@ static void http_handle_api(int fd, const char *body) {
             if (ks) {
                 char esc[512];
                 json_escape(esc, sizeof(esc), ks->source);
+                int active_voices = 0;
+                for (int vi = 0; vi < KEYSEQ_MAX_VOICES; vi++)
+                    if (ks->voices[vi].active) active_voices++;
                 rlen = snprintf(resp, sizeof(resp),
                     "{\"channel\":%d,\"enabled\":%d,\"dsl\":\"%s\","
                     "\"algo\":%d,\"gated\":%d,\"loop\":%d,"
                     "\"step_beats\":%.4f,\"gate_beats\":%.4f,"
-                    "\"playing\":%d}",
+                    "\"active_voices\":%d}",
                     ch, ks->enabled, esc, ks->algo_mode, ks->gated, ks->loop,
-                    (double)ks->step_beats, (double)ks->gate_beats, ks->playing);
+                    (double)ks->step_beats, (double)ks->gate_beats, active_voices);
             } else {
                 rlen = snprintf(resp, sizeof(resp),
                     "{\"channel\":%d,\"enabled\":0,\"dsl\":\"\"}", ch);
