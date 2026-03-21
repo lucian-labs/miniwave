@@ -336,20 +336,115 @@ static int ym2413_json_load(void *state, const char *json) {
 
 static void ym2413_set_param(void *state, const char *name, float value) {
     YM2413State *s = (YM2413State *)state;
+    int iv = (int)value;
+
     if (strcmp(name, "instrument") == 0) {
-        int inst = (int)value;
-        if (inst >= 0 && inst < 16) s->current_instrument = inst;
+        if (iv >= 0 && iv < 16) s->current_instrument = iv;
     }
     else if (strcmp(name, "volume") == 0) {
-        s->volume = value;
-        if (s->volume < 0) s->volume = 0;
-        if (s->volume > 1) s->volume = 1;
+        s->volume = value < 0 ? 0 : value > 1 ? 1 : value;
     }
     else if (strcmp(name, "rhythm") == 0) {
         s->rhythm_mode = value != 0 ? 1 : 0;
         e_uint8 reg0e = s->opll->reg[0x0E];
         if (s->rhythm_mode) reg0e |= 0x20; else reg0e &= ~0x20;
         OPLL_writeReg(s->opll, 0x0E, reg0e);
+    }
+    /* ── Custom patch registers (instrument 0) ── */
+    /* Modulator: reg 0x00 and 0x01 */
+    else if (strcmp(name, "mod_mult") == 0)    { /* multiplier 0-15 */
+        e_uint8 r = s->opll->reg[0x00]; r = (r & 0xF0) | (iv & 0x0F);
+        OPLL_writeReg(s->opll, 0x00, r);
+    }
+    else if (strcmp(name, "mod_ksr") == 0)     { /* key scale rate 0-1 */
+        e_uint8 r = s->opll->reg[0x00]; if (iv) r |= 0x10; else r &= ~0x10;
+        OPLL_writeReg(s->opll, 0x00, r);
+    }
+    else if (strcmp(name, "mod_eg") == 0)      { /* EG type 0-1 */
+        e_uint8 r = s->opll->reg[0x00]; if (iv) r |= 0x20; else r &= ~0x20;
+        OPLL_writeReg(s->opll, 0x00, r);
+    }
+    else if (strcmp(name, "mod_vibrato") == 0) { /* vibrato 0-1 */
+        e_uint8 r = s->opll->reg[0x00]; if (iv) r |= 0x40; else r &= ~0x40;
+        OPLL_writeReg(s->opll, 0x00, r);
+    }
+    else if (strcmp(name, "mod_am") == 0)      { /* AM 0-1 */
+        e_uint8 r = s->opll->reg[0x00]; if (iv) r |= 0x80; else r &= ~0x80;
+        OPLL_writeReg(s->opll, 0x00, r);
+    }
+    else if (strcmp(name, "mod_tl") == 0)      { /* total level 0-63 */
+        e_uint8 r = s->opll->reg[0x02]; r = (r & 0xC0) | (iv & 0x3F);
+        OPLL_writeReg(s->opll, 0x02, r);
+    }
+    else if (strcmp(name, "mod_ksl") == 0)     { /* key scale level 0-3 */
+        e_uint8 r = s->opll->reg[0x02]; r = (r & 0x3F) | ((iv & 3) << 6);
+        OPLL_writeReg(s->opll, 0x02, r);
+    }
+    else if (strcmp(name, "mod_wave") == 0)    { /* waveform 0-1 */
+        e_uint8 r = s->opll->reg[0x03]; if (iv) r |= 0x08; else r &= ~0x08;
+        OPLL_writeReg(s->opll, 0x03, r);
+    }
+    else if (strcmp(name, "mod_attack") == 0)  { /* attack rate 0-15 */
+        e_uint8 r = s->opll->reg[0x04]; r = (r & 0x0F) | ((iv & 0x0F) << 4);
+        OPLL_writeReg(s->opll, 0x04, r);
+    }
+    else if (strcmp(name, "mod_decay") == 0)   { /* decay rate 0-15 */
+        e_uint8 r = s->opll->reg[0x04]; r = (r & 0xF0) | (iv & 0x0F);
+        OPLL_writeReg(s->opll, 0x04, r);
+    }
+    else if (strcmp(name, "mod_sustain") == 0) { /* sustain level 0-15 */
+        e_uint8 r = s->opll->reg[0x06]; r = (r & 0x0F) | ((iv & 0x0F) << 4);
+        OPLL_writeReg(s->opll, 0x06, r);
+    }
+    else if (strcmp(name, "mod_release") == 0) { /* release rate 0-15 */
+        e_uint8 r = s->opll->reg[0x06]; r = (r & 0xF0) | (iv & 0x0F);
+        OPLL_writeReg(s->opll, 0x06, r);
+    }
+    /* Carrier: reg 0x01 and 0x03 */
+    else if (strcmp(name, "car_mult") == 0)    {
+        e_uint8 r = s->opll->reg[0x01]; r = (r & 0xF0) | (iv & 0x0F);
+        OPLL_writeReg(s->opll, 0x01, r);
+    }
+    else if (strcmp(name, "car_ksr") == 0)     {
+        e_uint8 r = s->opll->reg[0x01]; if (iv) r |= 0x10; else r &= ~0x10;
+        OPLL_writeReg(s->opll, 0x01, r);
+    }
+    else if (strcmp(name, "car_eg") == 0)      {
+        e_uint8 r = s->opll->reg[0x01]; if (iv) r |= 0x20; else r &= ~0x20;
+        OPLL_writeReg(s->opll, 0x01, r);
+    }
+    else if (strcmp(name, "car_vibrato") == 0) {
+        e_uint8 r = s->opll->reg[0x01]; if (iv) r |= 0x40; else r &= ~0x40;
+        OPLL_writeReg(s->opll, 0x01, r);
+    }
+    else if (strcmp(name, "car_am") == 0)      {
+        e_uint8 r = s->opll->reg[0x01]; if (iv) r |= 0x80; else r &= ~0x80;
+        OPLL_writeReg(s->opll, 0x01, r);
+    }
+    else if (strcmp(name, "car_wave") == 0)    {
+        e_uint8 r = s->opll->reg[0x03]; if (iv) r |= 0x10; else r &= ~0x10;
+        OPLL_writeReg(s->opll, 0x03, r);
+    }
+    else if (strcmp(name, "car_attack") == 0)  {
+        e_uint8 r = s->opll->reg[0x05]; r = (r & 0x0F) | ((iv & 0x0F) << 4);
+        OPLL_writeReg(s->opll, 0x05, r);
+    }
+    else if (strcmp(name, "car_decay") == 0)   {
+        e_uint8 r = s->opll->reg[0x05]; r = (r & 0xF0) | (iv & 0x0F);
+        OPLL_writeReg(s->opll, 0x05, r);
+    }
+    else if (strcmp(name, "car_sustain") == 0) {
+        e_uint8 r = s->opll->reg[0x07]; r = (r & 0x0F) | ((iv & 0x0F) << 4);
+        OPLL_writeReg(s->opll, 0x07, r);
+    }
+    else if (strcmp(name, "car_release") == 0) {
+        e_uint8 r = s->opll->reg[0x07]; r = (r & 0xF0) | (iv & 0x0F);
+        OPLL_writeReg(s->opll, 0x07, r);
+    }
+    /* Feedback */
+    else if (strcmp(name, "feedback") == 0)    { /* feedback 0-7 */
+        e_uint8 r = s->opll->reg[0x03]; r = (r & 0xF8) | (iv & 0x07);
+        OPLL_writeReg(s->opll, 0x03, r);
     }
 }
 
