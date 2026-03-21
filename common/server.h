@@ -883,8 +883,6 @@ static void http_handle_api(int fd, const char *body) {
             "]}"
             "}");
 
-        pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos), "}");
-
         /* ── Active channel state ── */
         if (ch >= 0 && ch < MAX_SLOTS) {
             RackSlot *slot = &g_rack.slots[ch];
