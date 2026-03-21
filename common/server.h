@@ -1198,7 +1198,43 @@ static void http_handle_api(int fd, const char *body) {
                 if (slot->seq && up->seq_dsl[0])
                     seq_parse(slot->seq, up->seq_dsl);
                 state_mark_dirty();
-                rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+
+                /* Return full channel state so frontend can update immediately */
+                int pos = 0;
+                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                    "{\"ok\":true,\"channel\":%d,\"instrument\":\"%s\"", ch, itype->name);
+
+                /* Instrument params */
+                if (itype->json_status) {
+                    pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), ",");
+                    pos += itype->json_status(slot->state, resp + pos, SSE_BUF_SIZE - pos);
+                }
+
+                /* Current values */
+                if (itype->json_save) {
+                    char pbuf[2048];
+                    int pn = itype->json_save(slot->state, pbuf, (int)sizeof(pbuf));
+                    if (pn > 0) pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), ",%s", pbuf);
+                }
+
+                /* Keyseq state */
+                if (slot->keyseq && slot->keyseq->enabled && slot->keyseq->source[0]) {
+                    char esc[512];
+                    json_escape(esc, sizeof(esc), slot->keyseq->source);
+                    pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                        ",\"keyseq_dsl\":\"%s\",\"keyseq_enabled\":1", esc);
+                } else {
+                    pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos),
+                        ",\"keyseq_dsl\":\"\",\"keyseq_enabled\":0");
+                }
+
+                pos += snprintf(resp + pos, (size_t)(SSE_BUF_SIZE - pos), "}");
+                rlen = pos;
+
+                /* Also push SSE so other connected clients update */
+                char sse_json[SSE_BUF_SIZE];
+                build_ch_status_json(ch, sse_json, (int)sizeof(sse_json));
+                sse_broadcast("ch_status", sse_json);
             } else {
                 rlen = snprintf(resp, sizeof(resp), "{\"error\":\"load failed\"}");
             }
