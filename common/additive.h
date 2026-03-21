@@ -97,6 +97,10 @@ typedef struct {
 /* ── Wavetable generation ─────────────────────────────────────────────── */
 
 static void additive_build_table(AdditiveState *s) {
+    static const char *mode_names[] = {"harmonic", "partial", "cluster"};
+    fprintf(stderr, "[additive] build_table: mode=%s harmonics=%d ratio=%.2f spread=%.2f rolloff=%.2f\n",
+            mode_names[s->mode], s->num_harmonics,
+            (double)s->cluster_ratio, (double)s->cluster_spread, (double)s->cluster_rolloff);
     memset(s->table, 0, sizeof(s->table));
 
     if (s->mode == ADD_MODE_HARMONIC || s->mode == ADD_MODE_CLUSTER) {
@@ -110,16 +114,17 @@ static void additive_build_table(AdditiveState *s) {
 
             float freq_mult;
             if (s->mode == ADD_MODE_HARMONIC) {
-                freq_mult = (float)(h + 1); /* integer harmonics */
+                /* Harmonic: integer multiples, shifted by ratio, spread adds detune */
+                freq_mult = (float)(h + 1) * s->cluster_ratio;
+                freq_mult += s->cluster_spread * sinf((float)h * 1.618f);
             } else {
-                /* Cluster: ratio-based spacing */
+                /* Cluster: ratio-based exponential spacing */
                 freq_mult = powf(s->cluster_ratio, (float)h);
-                /* Add spread/detuning */
                 freq_mult += s->cluster_spread * sinf((float)h * 1.618f);
             }
 
-            /* Apply rolloff for cluster mode */
-            if (s->mode == ADD_MODE_CLUSTER && h > 0) {
+            /* Rolloff applied in both modes */
+            if (h > 0) {
                 amp *= powf(s->cluster_rolloff, (float)h);
             }
 
@@ -342,6 +347,8 @@ static void additive_render(void *state, float *stereo_buf, int frames, int samp
 static void additive_set_param(void *state, const char *name, float value) {
     AdditiveState *s = (AdditiveState *)state;
 
+    fprintf(stderr, "[additive] set_param %s = %.4f\n", name, (double)value);
+
     if (strcmp(name, "volume") == 0)    { s->volume = value < 0 ? 0 : value > 1 ? 1 : value; }
     else if (strcmp(name, "mode") == 0) { s->mode = (int)value % 3; s->table_dirty = 1; }
     else if (strcmp(name, "harmonics") == 0) { s->num_harmonics = (int)value; if (s->num_harmonics<1) s->num_harmonics=1; if (s->num_harmonics>ADD_MAX_HARMONICS) s->num_harmonics=ADD_MAX_HARMONICS; s->table_dirty=1; }
@@ -424,6 +431,9 @@ static int additive_json_status(void *state, char *buf, int max) {
 
 static int additive_json_save(void *state, char *buf, int max) {
     AdditiveState *s = (AdditiveState *)state;
+    fprintf(stderr, "[additive] json_save: mode=%d harmonics=%d vol=%.2f ratio=%.2f spread=%.2f rolloff=%.2f\n",
+            s->mode, s->num_harmonics, (double)s->volume,
+            (double)s->cluster_ratio, (double)s->cluster_spread, (double)s->cluster_rolloff);
     int pos = 0;
     pos += snprintf(buf + pos, (size_t)(max - pos),
         "\"mode\":%d,\"harmonics\":%d,\"volume\":%.4f,"
@@ -445,17 +455,20 @@ static int additive_json_save(void *state, char *buf, int max) {
 static int additive_json_load(void *state, const char *json) {
     AdditiveState *s = (AdditiveState *)state;
     int ival; float fval;
-    if (json_get_int(json, "mode", &ival) == 0) s->mode = ival % 3;
-    if (json_get_int(json, "harmonics", &ival) == 0) s->num_harmonics = ival;
-    if (json_get_float(json, "volume", &fval) == 0) s->volume = fval;
+    fprintf(stderr, "[additive] json_load: parsing...\n");
+    if (json_get_int(json, "mode", &ival) == 0) { s->mode = ival % 3; fprintf(stderr, "[additive]   mode=%d\n", s->mode); }
+    if (json_get_int(json, "harmonics", &ival) == 0) { s->num_harmonics = ival; fprintf(stderr, "[additive]   harmonics=%d\n", ival); }
+    if (json_get_float(json, "volume", &fval) == 0) { s->volume = fval; fprintf(stderr, "[additive]   volume=%.4f\n", (double)fval); }
     if (json_get_float(json, "attack", &fval) == 0) s->attack = fval;
     if (json_get_float(json, "decay", &fval) == 0) s->decay = fval;
     if (json_get_float(json, "sustain", &fval) == 0) s->sustain = fval;
     if (json_get_float(json, "release", &fval) == 0) s->release = fval;
-    if (json_get_float(json, "ratio", &fval) == 0) s->cluster_ratio = fval;
-    if (json_get_float(json, "spread", &fval) == 0) s->cluster_spread = fval;
-    if (json_get_float(json, "rolloff", &fval) == 0) s->cluster_rolloff = fval;
+    if (json_get_float(json, "ratio", &fval) == 0) { s->cluster_ratio = fval; fprintf(stderr, "[additive]   ratio=%.4f\n", (double)fval); }
+    if (json_get_float(json, "spread", &fval) == 0) { s->cluster_spread = fval; fprintf(stderr, "[additive]   spread=%.4f\n", (double)fval); }
+    if (json_get_float(json, "rolloff", &fval) == 0) { s->cluster_rolloff = fval; fprintf(stderr, "[additive]   rolloff=%.4f\n", (double)fval); }
     s->table_dirty = 1;
+    fprintf(stderr, "[additive] json_load done: mode=%d harmonics=%d vol=%.2f\n",
+            s->mode, s->num_harmonics, (double)s->volume);
     return 0;
 }
 

@@ -763,6 +763,8 @@ static void http_handle_api(int fd, const char *body) {
             "{\"name\":\"sustain\",\"min\":0,\"max\":1,\"default\":0.5,\"type\":\"float\"},"
             "{\"name\":\"release\",\"min\":0.01,\"max\":4,\"default\":0.3,\"type\":\"float\"},"
             "{\"name\":\"feedback\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"float\"}"
+            "],\"envelopes\":["
+            "{\"name\":\"envelope\",\"attack\":\"attack\",\"decay\":\"decay\",\"sustain\":\"sustain\",\"release\":\"release\"}"
             "],\"presets\":[");
         for (int p = 0; p < NUM_PRESETS; p++) {
             pos += snprintf(sbuf + pos, (size_t)(SPEC_BUF_SIZE - pos),
@@ -798,6 +800,9 @@ static void http_handle_api(int fd, const char *body) {
             "{\"name\":\"amp_decay\",\"min\":0.001,\"max\":5,\"default\":0.1,\"type\":\"float\"},"
             "{\"name\":\"amp_sustain\",\"min\":0,\"max\":1,\"default\":0.8,\"type\":\"float\"},"
             "{\"name\":\"amp_release\",\"min\":0.001,\"max\":5,\"default\":0.15,\"type\":\"float\"}"
+            "],\"envelopes\":["
+            "{\"name\":\"amp\",\"attack\":\"amp_attack\",\"decay\":\"amp_decay\",\"sustain\":\"amp_sustain\",\"release\":\"amp_release\"},"
+            "{\"name\":\"filter\",\"attack\":\"filt_attack\",\"decay\":\"filt_decay\",\"sustain\":\"filt_sustain\",\"release\":\"filt_release\"}"
             "]},");
 
         /* ── ym2413 schema + patches ── */
@@ -831,6 +836,9 @@ static void http_handle_api(int fd, const char *body) {
             "{\"name\":\"car_am\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"bool\",\"group\":\"car\"},"
             "{\"name\":\"car_eg\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"bool\",\"group\":\"car\"},"
             "{\"name\":\"car_ksr\",\"min\":0,\"max\":1,\"default\":0,\"type\":\"bool\",\"group\":\"car\"}"
+            "],\"envelopes\":["
+            "{\"name\":\"mod\",\"attack\":\"mod_attack\",\"decay\":\"mod_decay\",\"sustain\":\"mod_sustain\",\"release\":\"mod_release\"},"
+            "{\"name\":\"car\",\"attack\":\"car_attack\",\"decay\":\"car_decay\",\"sustain\":\"car_sustain\",\"release\":\"car_release\"}"
             "],\"patches\":["
             "\"Custom\",\"Violin\",\"Guitar\",\"Piano\",\"Flute\","
             "\"Clarinet\",\"Oboe\",\"Trumpet\",\"Organ\",\"Horn\","
@@ -880,6 +888,8 @@ static void http_handle_api(int fd, const char *body) {
             "{\"name\":\"ratio\",\"min\":0.5,\"max\":4,\"default\":1.5,\"type\":\"float\",\"group\":\"cluster\"},"
             "{\"name\":\"spread\",\"min\":0,\"max\":2,\"default\":0,\"type\":\"float\",\"group\":\"cluster\"},"
             "{\"name\":\"rolloff\",\"min\":0,\"max\":1,\"default\":0.7,\"type\":\"float\",\"group\":\"cluster\"}"
+            "],\"envelopes\":["
+            "{\"name\":\"envelope\",\"attack\":\"attack\",\"decay\":\"decay\",\"sustain\":\"sustain\",\"release\":\"release\"}"
             "]}"
             "}");
 
