@@ -206,12 +206,10 @@ static void additive_note_on(AdditiveState *s, int note, int vel) {
     float freq = additive_midi_to_freq(note);
     float velocity = (float)vel / 127.0f;
 
-    /* Find free voice or steal oldest */
     int vi = -1;
     for (int i = 0; i < ADD_MAX_VOICES; i++)
         if (!s->voices[i].active) { vi = i; break; }
     if (vi < 0) {
-        /* Kill oldest with fadeout */
         vi = 0;
         s->voices[vi].killing = 1;
         s->voices[vi].kill_pos = 0;
@@ -224,17 +222,27 @@ static void additive_note_on(AdditiveState *s, int note, int vel) {
     v->freq = freq;
     v->velocity = velocity;
     v->env_state = 0;
+
+    int active = 0;
+    for (int i = 0; i < ADD_MAX_VOICES; i++) if (s->voices[i].active) active++;
+    fprintf(stderr, "[additive] note_on %d vel=%d freq=%.1fHz voice=%d (%d active)\n",
+            note, vel, (double)freq, vi, active);
 }
 
 static void additive_note_off(AdditiveState *s, int note) {
+    int found = 0;
     for (int i = 0; i < ADD_MAX_VOICES; i++) {
         AddVoice *v = &s->voices[i];
         if (v->active && v->note == note && v->env_state != 3) {
             v->env_state = 3;
             v->release_level = v->env_level;
             v->env_time = 0;
+            fprintf(stderr, "[additive] note_off %d voice=%d (env=%.3f → release)\n",
+                    note, i, (double)v->release_level);
+            found = 1;
         }
     }
+    if (!found) fprintf(stderr, "[additive] note_off %d — no active voice found\n", note);
 }
 
 /* ── InstrumentType interface ─────────────────────────────────────────── */

@@ -503,8 +503,25 @@ static void keyseq_fire_params_frame(KeySeq *ks, const KeySeqCtx *ctx) {
 
 /* ── MIDI helpers ── */
 
+/* Find which voice is firing this note (for logging) */
+static inline int keyseq_firing_voice(KeySeq *ks, int note) {
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        if (ks->voices[i].active && ks->voices[i].last_played_note == note) return i;
+    /* Check by root_note for step 0 */
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++)
+        if (ks->voices[i].active && ks->voices[i].root_note == note) return i;
+    return -1;
+}
+
 static inline void keyseq_fire_on(KeySeq *ks, int note, int vel) {
     if (!ks->midi_fn || note < 0 || note > 127) return;
+    /* Find parent voice for logging */
+    int pv = -1;
+    int root = -1;
+    for (int i = 0; i < KEYSEQ_MAX_VOICES; i++) {
+        if (ks->voices[i].active) { pv = i; root = ks->voices[i].root_note; break; }
+    }
+    fprintf(stderr, "[keyseq:fire] note_on %d vel=%d (seq_voice=%d root=%d)\n", note, vel, pv, root);
     ks->firing = 1;
     ks->midi_fn(ks->inst_state, (uint8_t)(0x90 | ks->midi_channel), (uint8_t)note, (uint8_t)vel);
     ks->firing = 0;
@@ -512,6 +529,7 @@ static inline void keyseq_fire_on(KeySeq *ks, int note, int vel) {
 
 static inline void keyseq_fire_off(KeySeq *ks, int note) {
     if (!ks->midi_fn || note < 0 || note > 127) return;
+    fprintf(stderr, "[keyseq:fire] note_off %d\n", note);
     ks->firing = 1;
     ks->midi_fn(ks->inst_state, (uint8_t)(0x80 | ks->midi_channel), (uint8_t)note, 0);
     ks->firing = 0;
