@@ -2206,6 +2206,25 @@ static int ym2413_json_status(void *state, char *buf, int max) {
         y->rhythm_mode, active_ch);
 }
 
+/* ── json_save/json_load — state persistence ──────────────────────────── */
+
+static int ym2413_json_save(void *state, char *buf, int max) {
+    YM2413State *y = (YM2413State *)state;
+    return snprintf(buf, (size_t)max,
+        "\"instrument\":%d,\"rhythm_mode\":%d",
+        y->current_instrument, y->rhythm_mode);
+}
+
+static int ym2413_json_load(void *state, const char *json) {
+    YM2413State *y = (YM2413State *)state;
+    int inst, rhy;
+    if (json_get_int(json, "instrument", &inst) == 0 && inst >= 0 && inst <= 15)
+        y->current_instrument = inst;
+    if (json_get_int(json, "rhythm_mode", &rhy) == 0)
+        y->rhythm_mode = rhy;
+    return 0;
+}
+
 /* ── set_param — named parameter setter ───────────────────────────────── */
 
 static void ym2413_set_param(void *state, const char *name, float value) {
@@ -2249,6 +2268,8 @@ InstrumentType ym2413_type = {
     .render       = ym2413_render,
     .set_param    = ym2413_set_param,
     .json_status  = ym2413_json_status,
+    .json_save    = ym2413_json_save,
+    .json_load    = ym2413_json_load,
     .osc_handle   = ym2413_osc_handle,
     .osc_status   = ym2413_osc_status,
 };

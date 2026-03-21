@@ -386,6 +386,77 @@ static int fmd_json_status(void *state, char *buf, int max) {
         active_v);
 }
 
+/* ── json_save/json_load — state persistence ──────────────────────── */
+
+static int fmd_json_save(void *state, char *buf, int max) {
+    FMDrumState *ds = (FMDrumState *)state;
+    int pos = 0;
+    pos += snprintf(buf + pos, (size_t)(max - pos), "\"notes\":{");
+    int first = 1;
+    for (int ni = 0; ni < FMD_NUM_NOTES; ni++) {
+        if (ds->notes[ni].preset < 0) continue;
+        FMDrumDef *dd = &ds->notes[ni].def;
+        pos += snprintf(buf + pos, (size_t)(max - pos),
+            "%s\"%d\":{\"p\":%d,\"cf\":%.4f,\"mf\":%.4f,\"mi\":%.4f,"
+            "\"sw\":%.4f,\"pd\":%.5f,\"dc\":%.4f,"
+            "\"na\":%.4f,\"ca\":%.4f,\"fb\":%.4f}",
+            first ? "" : ",", ni, ds->notes[ni].preset,
+            (double)dd->carrier_freq, (double)dd->mod_freq,
+            (double)dd->mod_index, (double)dd->pitch_sweep,
+            (double)dd->pitch_decay, (double)dd->decay,
+            (double)dd->noise_amt, (double)dd->click_amt,
+            (double)dd->feedback);
+        first = 0;
+    }
+    pos += snprintf(buf + pos, (size_t)(max - pos), "}");
+    return pos;
+}
+
+static int fmd_json_load(void *state, const char *json) {
+    FMDrumState *ds = (FMDrumState *)state;
+    const char *nobj = strstr(json, "\"notes\"");
+    if (nobj) {
+        nobj = strchr(nobj, '{');
+        if (nobj) nobj++;
+    }
+    if (nobj) {
+        const char *p = nobj;
+        while (p && *p) {
+            const char *q = strchr(p, '"');
+            if (!q) break;
+            int noteNum = atoi(q + 1);
+            if (noteNum < 0 || noteNum >= FMD_NUM_NOTES) break;
+            const char *brace = strchr(q + 1, '{');
+            if (!brace) break;
+            const char *bend = strchr(brace, '}');
+            if (!bend) break;
+            int nlen = (int)(bend - brace + 1);
+            char *njson = calloc(1, (size_t)(nlen + 1));
+            if (!njson) break;
+            memcpy(njson, brace, (size_t)nlen);
+            int preset;
+            float fv;
+            if (json_get_int(njson, "p", &preset) == 0 &&
+                preset >= 0 && preset < FMD_NUM_PRESETS) {
+                ds->notes[noteNum].preset = preset;
+                ds->notes[noteNum].def = FMD_PRESETS[preset];
+            }
+            if (json_get_float(njson, "cf", &fv) == 0) ds->notes[noteNum].def.carrier_freq = fv;
+            if (json_get_float(njson, "mf", &fv) == 0) ds->notes[noteNum].def.mod_freq = fv;
+            if (json_get_float(njson, "mi", &fv) == 0) ds->notes[noteNum].def.mod_index = fv;
+            if (json_get_float(njson, "sw", &fv) == 0) ds->notes[noteNum].def.pitch_sweep = fv;
+            if (json_get_float(njson, "pd", &fv) == 0) ds->notes[noteNum].def.pitch_decay = fv;
+            if (json_get_float(njson, "dc", &fv) == 0) ds->notes[noteNum].def.decay = fv;
+            if (json_get_float(njson, "na", &fv) == 0) ds->notes[noteNum].def.noise_amt = fv;
+            if (json_get_float(njson, "ca", &fv) == 0) ds->notes[noteNum].def.click_amt = fv;
+            if (json_get_float(njson, "fb", &fv) == 0) ds->notes[noteNum].def.feedback = fv;
+            free(njson);
+            p = bend + 1;
+        }
+    }
+    return 0;
+}
+
 /* ── set_param — named parameter setter ───────────────────────────── */
 
 static void fmd_set_param(void *state, const char *name, float value) {
@@ -417,6 +488,8 @@ InstrumentType fm_drums_type = {
     .render       = fmd_render,
     .set_param    = fmd_set_param,
     .json_status  = fmd_json_status,
+    .json_save    = fmd_json_save,
+    .json_load    = fmd_json_load,
     .osc_handle   = fmd_osc_handle,
     .osc_status   = fmd_osc_status,
 };

@@ -539,6 +539,57 @@ static int fm_synth_json_status(void *state, char *buf, int max) {
         active_voices);
 }
 
+/* ── json_save/json_load — state persistence ───────────────────────── */
+
+static int fm_synth_json_save(void *state, char *buf, int max) {
+    FMSynth *s = (FMSynth *)state;
+    int pos = 0;
+    pos += snprintf(buf + pos, (size_t)(max - pos),
+        "\"preset\":%d,\"override\":%d",
+        s->current_preset, s->live_params.override);
+    if (s->live_params.override) {
+        pos += snprintf(buf + pos, (size_t)(max - pos),
+            ",\"params\":{\"carrier_ratio\":%.4f,\"mod_ratio\":%.4f,"
+            "\"mod_index\":%.4f,\"attack\":%.4f,\"decay\":%.4f,"
+            "\"sustain\":%.4f,\"release\":%.4f,\"feedback\":%.4f}",
+            (double)s->live_params.carrier_ratio,
+            (double)s->live_params.mod_ratio,
+            (double)s->live_params.mod_index,
+            (double)s->live_params.attack,
+            (double)s->live_params.decay,
+            (double)s->live_params.sustain,
+            (double)s->live_params.release,
+            (double)s->live_params.feedback);
+    }
+    return pos;
+}
+
+static int fm_synth_json_load(void *state, const char *json) {
+    FMSynth *s = (FMSynth *)state;
+    int preset;
+    if (json_get_int(json, "preset", &preset) == 0 && preset >= 0 && preset < NUM_PRESETS) {
+        s->current_preset = preset;
+        fm_load_preset_params(s, preset);
+    }
+    int ovr;
+    if (json_get_int(json, "override", &ovr) == 0 && ovr) {
+        s->live_params.override = 1;
+        const char *pp = strstr(json, "\"params\"");
+        if (pp) {
+            float fv;
+            if (json_get_float(pp, "carrier_ratio", &fv) == 0) s->live_params.carrier_ratio = fv;
+            if (json_get_float(pp, "mod_ratio", &fv) == 0) s->live_params.mod_ratio = fv;
+            if (json_get_float(pp, "mod_index", &fv) == 0) s->live_params.mod_index = fv;
+            if (json_get_float(pp, "attack", &fv) == 0) s->live_params.attack = fv;
+            if (json_get_float(pp, "decay", &fv) == 0) s->live_params.decay = fv;
+            if (json_get_float(pp, "sustain", &fv) == 0) s->live_params.sustain = fv;
+            if (json_get_float(pp, "release", &fv) == 0) s->live_params.release = fv;
+            if (json_get_float(pp, "feedback", &fv) == 0) s->live_params.feedback = fv;
+        }
+    }
+    return 0;
+}
+
 /* ── set_param — named parameter setter ────────────────────────────── */
 
 static void fm_synth_set_param(void *state, const char *name, float value) {
@@ -579,6 +630,8 @@ InstrumentType fm_synth_type = {
     .render       = fm_synth_render,
     .set_param    = fm_synth_set_param,
     .json_status  = fm_synth_json_status,
+    .json_save    = fm_synth_json_save,
+    .json_load    = fm_synth_json_load,
     .osc_handle   = fm_synth_osc_handle,
     .osc_status   = fm_synth_osc_status,
 };

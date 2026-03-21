@@ -22,6 +22,7 @@
 #include <fcntl.h>
 
 #include "osc.h"
+#include "json-helpers.h"
 #include "instruments.h"
 #include "fm-synth.h"
 #include "ym2413.h"
@@ -241,99 +242,6 @@ static void rack_clear_slot(int channel) {
     state_mark_dirty();
 }
 
-/* ── JSON helpers (used by state persistence and server) ───────────── */
-
-static int json_get_string(const char *json, const char *key, char *out, int max) {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = json;
-    /* Find exact key — must be preceded by { , or whitespace, not a letter */
-    while ((p = strstr(p, pattern)) != NULL) {
-        if (p == json || p[-1] == '{' || p[-1] == ',' || p[-1] == ' ' || p[-1] == '\n')
-            break;
-        p += strlen(pattern);
-    }
-    if (!p) return -1;
-    p += strlen(pattern);
-    while (*p == ' ' || *p == ':') p++;
-    if (*p != '"') return -1;
-    p++;
-    int i = 0;
-    while (*p && *p != '"' && i < max - 1) {
-        if (*p == '\\' && *(p + 1)) { p++; }
-        out[i++] = *p++;
-    }
-    out[i] = '\0';
-    return 0;
-}
-
-static int json_get_int(const char *json, const char *key, int *out) {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return -1;
-    p += strlen(pattern);
-    while (*p == ' ' || *p == ':') p++;
-    if (*p == '"') { /* string-encoded number */
-        p++;
-        *out = atoi(p);
-        return 0;
-    }
-    if ((*p >= '0' && *p <= '9') || *p == '-') {
-        *out = atoi(p);
-        return 0;
-    }
-    return -1;
-}
-
-static int json_get_float(const char *json, const char *key, float *out) {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return -1;
-    p += strlen(pattern);
-    while (*p == ' ' || *p == ':') p++;
-    if ((*p >= '0' && *p <= '9') || *p == '-' || *p == '.') {
-        *out = strtof(p, NULL);
-        return 0;
-    }
-    return -1;
-}
-
-static int json_get_iarray_first(const char *json, const char *key, int *out) {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return -1;
-    p += strlen(pattern);
-    while (*p == ' ' || *p == ':') p++;
-    if (*p != '[') return -1;
-    p++;
-    while (*p == ' ') p++;
-    if ((*p >= '0' && *p <= '9') || *p == '-') {
-        *out = atoi(p);
-        return 0;
-    }
-    return -1;
-}
-
-static int json_get_farray_first(const char *json, const char *key, float *out) {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return -1;
-    p += strlen(pattern);
-    while (*p == ' ' || *p == ':') p++;
-    if (*p != '[') return -1;
-    p++;
-    while (*p == ' ') p++;
-    if ((*p >= '0' && *p <= '9') || *p == '-' || *p == '.') {
-        *out = strtof(p, NULL);
-        return 0;
-    }
-    return -1;
-}
-
 /* ══════════════════════════════════════════════════════════════════════
  *  State Persistence — auto-save/load rack to ~/.config/miniwave/rack.json
  * ══════════════════════════════════════════════════════════════════════ */
@@ -385,70 +293,10 @@ static void state_save(void) {
             fprintf(f, "\"type\":\"%s\",\"volume\":%.4f,\"mute\":%d,\"solo\":%d",
                     itype->name, (double)slot->volume, slot->mute, slot->solo);
 
-            if (strcmp(itype->name, "fm-synth") == 0) {
-                FMSynth *s = (FMSynth *)slot->state;
-                fprintf(f, ",\"preset\":%d,\"override\":%d", s->current_preset, s->live_params.override);
-                if (s->live_params.override) {
-                    fprintf(f, ",\"params\":{\"carrier_ratio\":%.4f,\"mod_ratio\":%.4f,"
-                            "\"mod_index\":%.4f,\"attack\":%.4f,\"decay\":%.4f,"
-                            "\"sustain\":%.4f,\"release\":%.4f,\"feedback\":%.4f}",
-                            (double)s->live_params.carrier_ratio,
-                            (double)s->live_params.mod_ratio,
-                            (double)s->live_params.mod_index,
-                            (double)s->live_params.attack,
-                            (double)s->live_params.decay,
-                            (double)s->live_params.sustain,
-                            (double)s->live_params.release,
-                            (double)s->live_params.feedback);
-                }
-            }
-            else if (strcmp(itype->name, "sub-synth") == 0) {
-                SubSynth *s = (SubSynth *)slot->state;
-                fprintf(f, ",\"params\":{\"waveform\":%d,\"pulse_width\":%.4f,"
-                        "\"filter_cutoff\":%.4f,\"filter_reso\":%.4f,"
-                        "\"filter_env_depth\":%.4f,"
-                        "\"filt_attack\":%.4f,\"filt_decay\":%.4f,"
-                        "\"filt_sustain\":%.4f,\"filt_release\":%.4f,"
-                        "\"amp_attack\":%.4f,\"amp_decay\":%.4f,"
-                        "\"amp_sustain\":%.4f,\"amp_release\":%.4f}",
-                        s->params.waveform,
-                        (double)s->params.pulse_width,
-                        (double)s->params.filter_cutoff,
-                        (double)s->params.filter_reso,
-                        (double)s->params.filter_env_depth,
-                        (double)s->params.filt_attack,
-                        (double)s->params.filt_decay,
-                        (double)s->params.filt_sustain,
-                        (double)s->params.filt_release,
-                        (double)s->params.amp_attack,
-                        (double)s->params.amp_decay,
-                        (double)s->params.amp_sustain,
-                        (double)s->params.amp_release);
-            }
-            else if (strcmp(itype->name, "ym2413") == 0) {
-                YM2413State *y = (YM2413State *)slot->state;
-                fprintf(f, ",\"instrument\":%d,\"rhythm_mode\":%d",
-                        y->current_instrument, y->rhythm_mode);
-            }
-            else if (strcmp(itype->name, "fm-drums") == 0) {
-                FMDrumState *ds = (FMDrumState *)slot->state;
-                fprintf(f, ",\"notes\":{");
-                int first = 1;
-                for (int ni = 0; ni < FMD_NUM_NOTES; ni++) {
-                    if (ds->notes[ni].preset < 0) continue;
-                    FMDrumDef *dd = &ds->notes[ni].def;
-                    fprintf(f, "%s\"%d\":{\"p\":%d,\"cf\":%.4f,\"mf\":%.4f,\"mi\":%.4f,"
-                            "\"sw\":%.4f,\"pd\":%.5f,\"dc\":%.4f,"
-                            "\"na\":%.4f,\"ca\":%.4f,\"fb\":%.4f}",
-                            first ? "" : ",", ni, ds->notes[ni].preset,
-                            (double)dd->carrier_freq, (double)dd->mod_freq,
-                            (double)dd->mod_index, (double)dd->pitch_sweep,
-                            (double)dd->pitch_decay, (double)dd->decay,
-                            (double)dd->noise_amt, (double)dd->click_amt,
-                            (double)dd->feedback);
-                    first = 0;
-                }
-                fprintf(f, "}");
+            if (itype->json_save) {
+                char inst_buf[4096];
+                int n = itype->json_save(slot->state, inst_buf, (int)sizeof(inst_buf));
+                if (n > 0) fprintf(f, ",%s", inst_buf);
             }
         }
 
@@ -518,105 +366,8 @@ static void state_load(void) {
                 if (json_get_int(slot_json, "mute", &ival) == 0) slot->mute = ival;
                 if (json_get_int(slot_json, "solo", &ival) == 0) slot->solo = ival;
 
-                if (strcmp(itype->name, "fm-synth") == 0) {
-                    FMSynth *s = (FMSynth *)slot->state;
-                    int preset;
-                    if (json_get_int(slot_json, "preset", &preset) == 0 && preset >= 0 && preset < NUM_PRESETS) {
-                        s->current_preset = preset;
-                        fm_load_preset_params(s, preset);
-                    }
-                    int ovr;
-                    if (json_get_int(slot_json, "override", &ovr) == 0 && ovr) {
-                        s->live_params.override = 1;
-                        const char *pp = strstr(slot_json, "\"params\"");
-                        if (pp) {
-                            float fv;
-                            if (json_get_float(pp, "carrier_ratio", &fv) == 0) s->live_params.carrier_ratio = fv;
-                            if (json_get_float(pp, "mod_ratio", &fv) == 0) s->live_params.mod_ratio = fv;
-                            if (json_get_float(pp, "mod_index", &fv) == 0) s->live_params.mod_index = fv;
-                            if (json_get_float(pp, "attack", &fv) == 0) s->live_params.attack = fv;
-                            if (json_get_float(pp, "decay", &fv) == 0) s->live_params.decay = fv;
-                            if (json_get_float(pp, "sustain", &fv) == 0) s->live_params.sustain = fv;
-                            if (json_get_float(pp, "release", &fv) == 0) s->live_params.release = fv;
-                            if (json_get_float(pp, "feedback", &fv) == 0) s->live_params.feedback = fv;
-                        }
-                    }
-                }
-                else if (strcmp(itype->name, "sub-synth") == 0) {
-                    SubSynth *s = (SubSynth *)slot->state;
-                    const char *pp = strstr(slot_json, "\"params\"");
-                    if (pp) {
-                        int wf;
-                        float fv;
-                        if (json_get_int(pp, "waveform", &wf) == 0) s->params.waveform = wf % SUB_WAVE_COUNT;
-                        if (json_get_float(pp, "pulse_width", &fv) == 0) s->params.pulse_width = fv;
-                        if (json_get_float(pp, "filter_cutoff", &fv) == 0) s->params.filter_cutoff = fv;
-                        if (json_get_float(pp, "filter_reso", &fv) == 0) s->params.filter_reso = fv;
-                        if (json_get_float(pp, "filter_env_depth", &fv) == 0) s->params.filter_env_depth = fv;
-                        if (json_get_float(pp, "filt_attack", &fv) == 0) s->params.filt_attack = fv;
-                        if (json_get_float(pp, "filt_decay", &fv) == 0) s->params.filt_decay = fv;
-                        if (json_get_float(pp, "filt_sustain", &fv) == 0) s->params.filt_sustain = fv;
-                        if (json_get_float(pp, "filt_release", &fv) == 0) s->params.filt_release = fv;
-                        if (json_get_float(pp, "amp_attack", &fv) == 0) s->params.amp_attack = fv;
-                        if (json_get_float(pp, "amp_decay", &fv) == 0) s->params.amp_decay = fv;
-                        if (json_get_float(pp, "amp_sustain", &fv) == 0) s->params.amp_sustain = fv;
-                        if (json_get_float(pp, "amp_release", &fv) == 0) s->params.amp_release = fv;
-                    }
-                }
-                else if (strcmp(itype->name, "ym2413") == 0) {
-                    YM2413State *y = (YM2413State *)slot->state;
-                    int inst, rhy;
-                    if (json_get_int(slot_json, "instrument", &inst) == 0 && inst >= 0 && inst <= 15)
-                        y->current_instrument = inst;
-                    if (json_get_int(slot_json, "rhythm_mode", &rhy) == 0)
-                        y->rhythm_mode = rhy;
-                }
-                else if (strcmp(itype->name, "fm-drums") == 0) {
-                    FMDrumState *ds = (FMDrumState *)slot->state;
-                    /* Parse per-note "notes":{"36":{...},"38":{...}} */
-                    const char *nobj = strstr(slot_json, "\"notes\"");
-                    if (nobj) {
-                        nobj = strchr(nobj, '{');
-                        if (nobj) nobj++; /* skip opening { of notes object */
-                    }
-                    if (nobj) {
-                        /* Scan for "N":{ entries */
-                        const char *p = nobj;
-                        while (p && *p) {
-                            /* Find next key like "36" */
-                            const char *q = strchr(p, '"');
-                            if (!q) break;
-                            int noteNum = atoi(q + 1);
-                            if (noteNum < 0 || noteNum >= FMD_NUM_NOTES) break;
-                            /* Find the { for this note's object */
-                            const char *brace = strchr(q + 1, '{');
-                            if (!brace) break;
-                            const char *bend = strchr(brace, '}');
-                            if (!bend) break;
-                            int nlen = (int)(bend - brace + 1);
-                            char *njson = calloc(1, (size_t)(nlen + 1));
-                            if (!njson) break;
-                            memcpy(njson, brace, (size_t)nlen);
-                            int preset;
-                            float fv;
-                            if (json_get_int(njson, "p", &preset) == 0 &&
-                                preset >= 0 && preset < FMD_NUM_PRESETS) {
-                                ds->notes[noteNum].preset = preset;
-                                ds->notes[noteNum].def = FMD_PRESETS[preset];
-                            }
-                            if (json_get_float(njson, "cf", &fv) == 0) ds->notes[noteNum].def.carrier_freq = fv;
-                            if (json_get_float(njson, "mf", &fv) == 0) ds->notes[noteNum].def.mod_freq = fv;
-                            if (json_get_float(njson, "mi", &fv) == 0) ds->notes[noteNum].def.mod_index = fv;
-                            if (json_get_float(njson, "sw", &fv) == 0) ds->notes[noteNum].def.pitch_sweep = fv;
-                            if (json_get_float(njson, "pd", &fv) == 0) ds->notes[noteNum].def.pitch_decay = fv;
-                            if (json_get_float(njson, "dc", &fv) == 0) ds->notes[noteNum].def.decay = fv;
-                            if (json_get_float(njson, "na", &fv) == 0) ds->notes[noteNum].def.noise_amt = fv;
-                            if (json_get_float(njson, "ca", &fv) == 0) ds->notes[noteNum].def.click_amt = fv;
-                            if (json_get_float(njson, "fb", &fv) == 0) ds->notes[noteNum].def.feedback = fv;
-                            free(njson);
-                            p = bend + 1;
-                        }
-                    }
+                if (itype->json_load) {
+                    itype->json_load(slot->state, slot_json);
                 }
             }
         }

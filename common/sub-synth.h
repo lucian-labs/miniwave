@@ -617,6 +617,56 @@ static int sub_synth_json_status(void *state, char *buf, int max) {
         active_v);
 }
 
+/* ── json_save/json_load — state persistence ──────────────────────────── */
+
+static int sub_synth_json_save(void *state, char *buf, int max) {
+    SubSynth *s = (SubSynth *)state;
+    return snprintf(buf, (size_t)max,
+        "\"params\":{\"waveform\":%d,\"pulse_width\":%.4f,"
+        "\"filter_cutoff\":%.4f,\"filter_reso\":%.4f,"
+        "\"filter_env_depth\":%.4f,"
+        "\"filt_attack\":%.4f,\"filt_decay\":%.4f,"
+        "\"filt_sustain\":%.4f,\"filt_release\":%.4f,"
+        "\"amp_attack\":%.4f,\"amp_decay\":%.4f,"
+        "\"amp_sustain\":%.4f,\"amp_release\":%.4f}",
+        s->params.waveform,
+        (double)s->params.pulse_width,
+        (double)s->params.filter_cutoff,
+        (double)s->params.filter_reso,
+        (double)s->params.filter_env_depth,
+        (double)s->params.filt_attack,
+        (double)s->params.filt_decay,
+        (double)s->params.filt_sustain,
+        (double)s->params.filt_release,
+        (double)s->params.amp_attack,
+        (double)s->params.amp_decay,
+        (double)s->params.amp_sustain,
+        (double)s->params.amp_release);
+}
+
+static int sub_synth_json_load(void *state, const char *json) {
+    SubSynth *s = (SubSynth *)state;
+    const char *pp = strstr(json, "\"params\"");
+    if (pp) {
+        int wf;
+        float fv;
+        if (json_get_int(pp, "waveform", &wf) == 0) s->params.waveform = wf % SUB_WAVE_COUNT;
+        if (json_get_float(pp, "pulse_width", &fv) == 0) s->params.pulse_width = fv;
+        if (json_get_float(pp, "filter_cutoff", &fv) == 0) s->params.filter_cutoff = fv;
+        if (json_get_float(pp, "filter_reso", &fv) == 0) s->params.filter_reso = fv;
+        if (json_get_float(pp, "filter_env_depth", &fv) == 0) s->params.filter_env_depth = fv;
+        if (json_get_float(pp, "filt_attack", &fv) == 0) s->params.filt_attack = fv;
+        if (json_get_float(pp, "filt_decay", &fv) == 0) s->params.filt_decay = fv;
+        if (json_get_float(pp, "filt_sustain", &fv) == 0) s->params.filt_sustain = fv;
+        if (json_get_float(pp, "filt_release", &fv) == 0) s->params.filt_release = fv;
+        if (json_get_float(pp, "amp_attack", &fv) == 0) s->params.amp_attack = fv;
+        if (json_get_float(pp, "amp_decay", &fv) == 0) s->params.amp_decay = fv;
+        if (json_get_float(pp, "amp_sustain", &fv) == 0) s->params.amp_sustain = fv;
+        if (json_get_float(pp, "amp_release", &fv) == 0) s->params.amp_release = fv;
+    }
+    return 0;
+}
+
 /* ── set_param — named parameter setter ───────────────────────────────── */
 
 static void sub_synth_set_param(void *state, const char *name, float value) {
@@ -654,6 +704,8 @@ InstrumentType sub_synth_type = {
     .render       = sub_synth_render,
     .set_param    = sub_synth_set_param,
     .json_status  = sub_synth_json_status,
+    .json_save    = sub_synth_json_save,
+    .json_load    = sub_synth_json_load,
     .osc_handle   = sub_synth_osc_handle,
     .osc_status   = sub_synth_osc_status,
 };
