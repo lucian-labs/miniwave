@@ -10,7 +10,7 @@ the goal is to start super small, learn the fundamentals, and go fro mthere.
   - highly visual, intutive interface
 - additive
   - user algorithm input based
-- anything wavetable
+- the anything wavetable
   - drop in a wav file, slices it up into normalized samples stretched out and interpolated to root c or soemthing
 
 # fx
@@ -18,6 +18,8 @@ the goal is to start super small, learn the fundamentals, and go fro mthere.
 - delay
 - algo delay
   - user puts in recursive fucntions
+- wave function collapse delay
+  - /Users/elijahlucian/repos/nextgenart/wfc/src/lib/dsp.ts
 
 # key sequnces
 

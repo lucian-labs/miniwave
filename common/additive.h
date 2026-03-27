@@ -407,7 +407,10 @@ static void additive_render(void *state, float *stereo_buf, int frames, int samp
             if (v->age > 30.0f) { v->active = 0; continue; }
 
             float env = additive_env_tick(v, s->attack, s->decay, s->sustain, s->release, dt);
-            if (env <= 0.0f && v->env_state == 3) { v->active = 0; continue; }
+            if (env <= 0.0f && v->env_state == 3) {
+                fprintf(stderr, "[additive] voice %d deactivated (release complete, note=%d)\n", vi, v->note);
+                v->active = 0; continue;
+            }
 
             /* Read wavetable */
             float sample = additive_read_table(s, v->phase);
