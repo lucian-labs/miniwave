@@ -5,7 +5,20 @@
 <title>KeySeq Expression Tester</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-:root { --bg: #0d0d0d; --panel: #1a1a2e; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #e0e0e0; --dim: #666; --border: #2a2a4a; }
+:root {
+  --bg: #0d0d0d; --panel: #1a1a2e; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #e0e0e0; --dim: #666; --border: #2a2a4a;
+  --hw-shadow:
+    rgba(255,255,255,0.18) 0 1px 1px 0 inset,
+    rgba(0,0,0,0.7) 0 -1px 1px 0 inset,
+    rgba(0,0,0,0.25) 0 1px 2px 0,
+    rgba(0,0,0,0.22) 0 3px 4px -1px,
+    rgba(0,0,0,0.18) 0 6px 8px -2px;
+  --hw-shadow-sm:
+    rgba(255,255,255,0.15) 0 1px 0 0 inset,
+    rgba(0,0,0,0.6) 0 -1px 0 0 inset,
+    rgba(0,0,0,0.3) 0 1px 2px 0;
+  --hw-pressed: rgba(0,0,0,0.85) 0 1px 5px 0 inset;
+}
 html, body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; height: 100%; overflow: hidden; }
 
 #page { display: flex; flex-direction: column; height: 100%; padding: 16px 20px; gap: 12px; }
@@ -15,20 +28,21 @@ html, body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 
 
 /* ch nav */
 .ch-nav { display: flex; align-items: center; gap: 2px; }
-.ch-nav button { width: 22px; height: 22px; padding: 0; font-size: 13px; line-height: 22px; text-align: center; border-radius: 3px; background: var(--card); border: 1px solid var(--border); color: var(--dim); cursor: pointer; }
-.ch-nav button:hover { border-color: var(--accent); color: var(--text); }
+.ch-nav button { width: 24px; height: 24px; padding: 0; font-size: 13px; line-height: 24px; text-align: center; border-radius: 5px; background: var(--card); border: none; color: var(--dim); cursor: pointer; box-shadow: var(--hw-shadow); transition: all 0.15s; }
+.ch-nav button:hover { color: var(--text); }
+.ch-nav button:active { box-shadow: var(--hw-pressed); }
 .ch-label { font-size: 13px; font-weight: bold; color: var(--text); min-width: 90px; text-align: center; }
 
 /* midi select in header */
 .midi-sel { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .midi-sel label { margin: 0; font-size: 10px; color: var(--dim); text-transform: uppercase; }
-.midi-sel select { background: var(--card); color: var(--text); border: 1px solid var(--border); padding: 3px 6px; font-family: inherit; font-size: 11px; border-radius: 4px; min-width: 140px; }
+.midi-sel select { background: var(--card); color: var(--text); border: none; padding: 4px 8px; font-family: inherit; font-size: 11px; border-radius: 5px; min-width: 140px; box-shadow: var(--hw-shadow-sm); }
 
 #columns { display: flex; gap: 14px; flex: 1; min-height: 0; }
 #col-left { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-width: 0; }
 #col-right { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
-.section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px; flex-shrink: 0; }
+.section { background: var(--panel); border: none; border-radius: 6px; padding: 12px; flex-shrink: 0; box-shadow: var(--hw-shadow); }
 .section h3 { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
 /* preset-header has its own h3 styling */
 .preset-header { padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
@@ -40,16 +54,18 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 textarea { resize: none; font-size: 12px; }
 textarea[readonly] { opacity: 0.7; cursor: default; }
 
-button { background: var(--accent); color: white; border: none; padding: 5px 12px; border-radius: 4px; font-family: inherit; font-size: 11px; cursor: pointer; }
-button:hover { opacity: 0.85; }
-button.secondary { background: var(--card); border: 1px solid var(--border); color: var(--text); }
+button { background: var(--accent); color: white; border: none; padding: 5px 12px; border-radius: 5px; font-family: inherit; font-size: 11px; cursor: pointer; box-shadow: var(--hw-shadow); transition: all 0.15s; }
+button:hover { color: #fff; }
+button:active { box-shadow: var(--hw-pressed); }
+button.secondary { background: var(--card); color: var(--text); }
 button.stop { background: #555; }
 button.send { background: var(--good); color: #000; }
 
 .presets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.preset-btn { padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--card); border: 1px solid var(--border); color: var(--text); cursor: pointer; transition: all 0.15s; white-space: nowrap; }
-.preset-btn:hover { border-color: var(--accent); }
-.preset-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+.preset-btn { padding: 5px 10px; font-size: 11px; border-radius: 5px; background: var(--card); border: none; color: var(--text); cursor: pointer; transition: all 0.15s; white-space: nowrap; box-shadow: var(--hw-shadow-sm); }
+.preset-btn:hover { color: #fff; }
+.preset-btn:active { box-shadow: var(--hw-pressed); }
+.preset-btn.active { background: var(--accent); color: white; box-shadow: var(--hw-pressed); }
 
 /* preset header: title + rename input + add btn */
 .preset-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -61,22 +77,25 @@ button.send { background: var(--good); color: #000; }
 .row > * { flex: 1; }
 
 .tog { display: flex; gap: 4px; }
-.tog-btn { padding: 3px 10px; font-size: 11px; font-weight: bold; border-radius: 3px; background: var(--card); border: 1px solid var(--border); color: var(--dim); cursor: pointer; transition: all 0.15s; }
-.tog-btn.on { background: var(--accent); border-color: var(--accent); color: white; }
+.tog-btn { padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 5px; background: var(--card); border: none; color: var(--dim); cursor: pointer; transition: all 0.15s; box-shadow: var(--hw-shadow); }
+.tog-btn:hover { color: var(--text); }
+.tog-btn.on { background: var(--accent); color: white; box-shadow: var(--hw-pressed); }
 
-.pill { display: flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; margin-left: auto; flex-shrink: 0; }
-.pill-opt { padding: 3px 10px; font-size: 11px; cursor: pointer; color: var(--dim); background: var(--card); border: none; font-family: inherit; transition: all 0.15s; }
-.pill-opt.on { background: var(--accent); color: white; }
+.pill { display: flex; border: none; border-radius: 6px; overflow: hidden; margin-left: auto; flex-shrink: 0; box-shadow: var(--hw-shadow); }
+.pill-opt { padding: 4px 10px; font-size: 11px; cursor: pointer; color: var(--dim); background: var(--card); border: none; font-family: inherit; transition: all 0.15s; }
+.pill-opt:hover { color: var(--text); }
+.pill-opt.on { background: var(--accent); color: white; box-shadow: var(--hw-pressed); }
 
 .expr-row { display: flex; gap: 6px; align-items: center; margin-bottom: 5px; }
 .expr-row .elabel { width: 16px; flex-shrink: 0; color: var(--accent); font-weight: bold; font-size: 13px; text-align: center; }
 .expr-row input { flex: 1; }
 .expr-row.disabled input { opacity: 0.3; pointer-events: none; }
 .expr-row.disabled .elabel { opacity: 0.3; }
-.expr-row .rm-btn { width: 18px; height: 18px; padding: 0; font-size: 12px; line-height: 18px; text-align: center; border-radius: 3px; background: transparent; border: 1px solid var(--border); color: var(--dim); cursor: pointer; flex-shrink: 0; }
-.expr-row .rm-btn:hover { border-color: var(--accent); color: var(--accent); }
+.expr-row .rm-btn { width: 20px; height: 20px; padding: 0; font-size: 12px; line-height: 20px; text-align: center; border-radius: 4px; background: var(--card); border: none; color: var(--dim); cursor: pointer; flex-shrink: 0; box-shadow: var(--hw-shadow-sm); transition: all 0.15s; }
+.expr-row .rm-btn:hover { color: var(--accent); }
+.expr-row .rm-btn:active { box-shadow: var(--hw-pressed); }
 
-#preview-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+#preview-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: none; border-radius: 6px; overflow: hidden; box-shadow: var(--hw-shadow); }
 #preview-wrap h3 { padding: 10px 12px 6px; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0; margin: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
 #preview-wrap h3 .stats { color: var(--dim); font-weight: normal; margin-left: auto; }
 #preview { flex: 1; overflow-y: auto; padding: 8px 12px; font-size: 12px; white-space: pre-wrap; line-height: 1.6; }
@@ -99,8 +118,9 @@ button.send { background: var(--good); color: #000; }
 
 #offsets-section { display: none; }
 
-.play-btn { width: 24px; height: 24px; padding: 0; font-size: 14px; line-height: 24px; text-align: center; border-radius: 50%; background: var(--good); color: #000; border: none; cursor: pointer; flex-shrink: 0; }
-.play-btn:hover { opacity: 0.85; }
+.play-btn { width: 26px; height: 26px; padding: 0; font-size: 14px; line-height: 26px; text-align: center; border-radius: 50%; background: var(--good); color: #000; border: none; cursor: pointer; flex-shrink: 0; box-shadow: var(--hw-shadow); transition: all 0.15s; }
+.play-btn:hover { color: #000; }
+.play-btn:active { box-shadow: var(--hw-pressed); }
 .status { color: var(--good); font-size: 11px; }
 .inline-input { background: var(--card); border: 1px solid var(--border); color: var(--text); font-family: inherit; font-size: 11px; padding: 2px 4px; border-radius: 3px; text-align: center; }
 .inline-input:focus { outline: none; border-color: var(--accent); }
@@ -113,8 +133,8 @@ button.send { background: var(--good); color: #000; }
 .bpm-group input { width: 48px; padding: 3px 6px; font-size: 13px; text-align: center; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 4px; font-family: inherit; }
 .bpm-group input:focus { outline: none; border-color: var(--accent); }
 .bpm-group .bpm-label { font-size: 10px; color: var(--dim); text-transform: uppercase; }
-.tap-btn { padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 4px; background: var(--card); border: 1px solid var(--border); color: var(--text); cursor: pointer; transition: background 0.1s; user-select: none; -webkit-user-select: none; }
-.tap-btn:active { background: var(--accent); color: white; border-color: var(--accent); }
+.tap-btn { padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 5px; background: var(--card); border: none; color: var(--text); cursor: pointer; transition: all 0.1s; user-select: none; -webkit-user-select: none; box-shadow: var(--hw-shadow); }
+.tap-btn:active { background: var(--accent); color: white; box-shadow: var(--hw-pressed); }
 </style>
 </head>
 <body>
@@ -122,13 +142,14 @@ button.send { background: var(--good); color: #000; }
 <div id="page">
 
 <div id="header">
-  <a href="/" style="color:var(--dim);text-decoration:none;font-size:16px;line-height:1;padding:2px 4px" title="Back to main panel">&lsaquo;</a>
-  <h1>KeySeq</h1>
+  <h1><a href="/" style="color:var(--dim);text-decoration:none">miniwave</a> / <span style="color:#8866cc">keyseq</span> / <a href="/effex" style="color:#00d4aa;text-decoration:none;font-size:16px">effex</a></h1>
   <div class="ch-nav">
     <button id="ch-prev" title="Prev channel (Cmd+[)">&lsaquo;</button>
     <span class="ch-label" id="ch-label">CH 1</span>
     <button id="ch-next" title="Next channel (Cmd+])">&rsaquo;</button>
   </div>
+  <div id="seq-enable" class="tog-btn" onclick="toggleSeqEnable()" title="Enable/disable keyseq on channel" style="padding:3px 8px;font-size:10px;cursor:pointer">OFF</div>
+  <span id="inst-badge" style="color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:0.5px"></span>
   <div class="bpm-group">
     <input type="text" id="bpm-input" value="120">
     <span class="bpm-label">bpm</span>
@@ -274,57 +295,35 @@ function parseNoteName(s) {
   return (parseInt(m[3]) + 1) * 12 + base + acc;
 }
 
-/* Instrument schemas — populated from keyseq_spec, cached (static) */
-let instSchemas = {};   /* { 'fm-synth': { params: [{name,min,max,default,type,scale?,labels?}] } } */
-let specVars = [];      /* expression variables */
-let specFuncs = [];     /* expression functions */
-let specConsts = [];    /* constants */
-let specOps = [];       /* operators */
+/* Instrument schemas — populated from keyseq_spec */
+let instSchemas = {};
+let specVars = [], specFuncs = [], specConsts = [], specOps = [];
 
-const LS_PRESETS = 'miniwave_keyseq_presets';
-const LS_ACTIVE = 'miniwave_keyseq_active';
 const LS_CHANNEL = 'miniwave_keyseq_channel';
 
 /* ── State ── */
-let presets = [];       // [{key, label, ...data}]
-let activeIdx = 0;
+let presets = [];       // [{name, dsl}] — from server
+let activePreset = '';  // name of currently loaded preset
 let activeCh = 0;
-let rackSlots = [];     // from SSE
+let rackSlots = [];
 let midiDevices = [];
 
-/* ── Default presets ── */
-const FACTORY = [
-  { key:'user',    label:'My Sequence', t:'0.125', g:'', gated:true, loop:false, algo:true, offsets:'0,12,7,12', levels:'1,0.7,0.5,0.3', n:'n+1', v:'v-0.03', et:'', eg:'', end:'v<=0', frame:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'shimmer', label:'Shimmer',     t:'0.125', g:'0.9', gated:false, loop:true, algo:false, offsets:'0,12,7,12', levels:'1,0.7,0.5,0.3', n:'', v:'', et:'', eg:'', en:{n:false,v:false,t:false,g:false} },
-  { key:'climb',   label:'Climb',       t:'0.125', g:'', gated:true, loop:false, algo:true, n:'n+1', v:'v-0.03', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'siren',   label:'Siren',       t:'0.5', g:'', gated:true, loop:false, algo:true, n:'root+i%2*10-5', v:'v', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'gun',     label:'Rapid Fire',  t:'0.2', g:'0.5', gated:true, loop:false, algo:true, n:'n', v:'v-0.005', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'fifths',  label:'Circle of 5ths', t:'0.125', g:'', gated:true, loop:false, algo:true, n:'root+i*7%12', v:'v-0.01', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'bounce',  label:'Bounce',      t:'0.125', g:'', gated:true, loop:false, algo:true, n:'root+abs(i%8-4)*3', v:'v-0.02', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
-  { key:'scatter', label:'Scatter',     t:'0.1', g:'0.8', gated:true, loop:false, algo:true, n:'root+i*13%24-12', v:'v-0.015', et:'', eg:'', en:{n:true,v:true,t:false,g:false} },
-];
-
 function loadState() {
-  try {
-    const raw = localStorage.getItem(LS_PRESETS);
-    if (raw) presets = JSON.parse(raw);
-  } catch(e) {}
-  if (!presets.length) presets = JSON.parse(JSON.stringify(FACTORY));
-  activeIdx = parseInt(localStorage.getItem(LS_ACTIVE)) || 0;
-  if (activeIdx >= presets.length) activeIdx = 0;
   activeCh = parseInt(localStorage.getItem(LS_CHANNEL)) || 0;
-}
-
-function savePresets() {
-  try { localStorage.setItem(LS_PRESETS, JSON.stringify(presets)); } catch(e) {}
-}
-
-function saveActiveIdx() {
-  try { localStorage.setItem(LS_ACTIVE, String(activeIdx)); } catch(e) {}
 }
 
 function saveCh() {
   try { localStorage.setItem(LS_CHANNEL, String(activeCh)); } catch(e) {}
+}
+
+async function loadServerPresets() {
+  try {
+    const r = await fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({type:'keyseq_preset_list'}) });
+    const data = await r.json();
+    presets = data.presets || [];
+  } catch(e) { presets = []; }
+  buildPresetBar();
 }
 
 /* ── Expression toggles ── */
@@ -379,13 +378,24 @@ function setCh(ch) {
   saveCh();
   updateChLabel();
   fetchSpec();
+  loadServerPresets();
+  schedulePreview();
 }
 
 function updateChLabel() {
   const s = rackSlots[activeCh];
   const info = s && s.active ? s.type : '';
-  document.getElementById('ch-label').textContent = `CH ${activeCh + 1}${info ? ' ' + info : ''}`;
+  document.getElementById('ch-label').textContent = `CH ${activeCh + 1}`;
+  document.getElementById('inst-badge').textContent = info;
   updateParamIndex();
+}
+
+function toggleSeqEnable() {
+  const tog = document.getElementById('seq-enable');
+  const enabling = !tog.classList.contains('on');
+  postAPI({type:'keyseq_enable', channel:activeCh, enabled: enabling ? 1 : 0}).catch(() => {});
+  tog.classList.toggle('on', enabling);
+  tog.textContent = enabling ? 'ON' : 'OFF';
 }
 
 document.getElementById('ch-prev').addEventListener('click', () => setCh(activeCh - 1));
@@ -397,117 +407,123 @@ document.addEventListener('keydown', (e) => {
   if (e.metaKey && e.key === ']') { e.preventDefault(); setCh(activeCh + 1); }
 });
 
-/* ── Capture form → preset data ── */
-function captureState() {
-  return {
-    t: document.getElementById('step-t').value,
-    g: document.getElementById('gate-t').value,
-    gated: document.getElementById('cb-gated').checked,
-    loop: document.getElementById('cb-loop').checked,
-    algo: document.getElementById('cb-algo').checked,
-    n: document.getElementById('expr-n').value,
-    v: document.getElementById('expr-v').value,
-    et: document.getElementById('expr-t').value,
-    eg: document.getElementById('expr-g').value,
-    offsets: document.getElementById('offsets').value,
-    levels: document.getElementById('levels').value,
-    frame: document.getElementById('expr-frame').value,
-    end: document.getElementById('expr-end').value,
-    seed: document.getElementById('seed-input').value,
-    en: { ...exprEnabled },
-    params: JSON.parse(JSON.stringify(activeParams)),
-  };
-}
-
 function autoSave() {
-  Object.assign(presets[activeIdx], captureState());
-  savePresets();
+  /* No-op — DSL is the source of truth, pushed to server on simulate() */
 }
 
-/* ── Preset bar ── */
+/* ── Preset bar (server-backed) ── */
 function buildPresetBar() {
   const bar = document.getElementById('preset-bar');
   bar.innerHTML = '';
-  presets.forEach((p, i) => {
+  if (!presets.length) { bar.innerHTML = '<span style="color:var(--dim);font-size:10px">no presets — hit + to save</span>'; return; }
+  presets.forEach(p => {
     const btn = document.createElement('button');
-    btn.className = 'preset-btn' + (i === activeIdx ? ' active' : '');
-    btn.textContent = p.label;
-    btn.addEventListener('click', () => selectPreset(i));
+    btn.className = 'preset-btn' + (p.name === activePreset ? ' active' : '');
+    btn.textContent = p.name;
+    btn.title = 'Right-click: rename/delete';
+    btn.addEventListener('click', () => selectPreset(p));
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      presetContextMenu(p.name);
+    });
     bar.appendChild(btn);
   });
 }
 
-function selectPreset(idx) {
-  autoSave();
-  activeIdx = idx;
-  saveActiveIdx();
-  applyPreset(presets[idx]);
+function selectPreset(p) {
+  activePreset = p.name;
+  document.getElementById('preset-name').value = p.name;
+  /* Load DSL into textarea and push to server */
+  document.getElementById('dsl-output').value = p.dsl;
+  parseDSLToForm(p.dsl);
+  sendDSL();
+  schedulePreview();
   buildPresetBar();
 }
 
-function applyPreset(p, skipDSL) {
-  document.getElementById('preset-name').value = p.label || '';
-  document.getElementById('step-t').value = p.t || '0.125';
-  document.getElementById('gate-t').value = p.g || '';
-  document.getElementById('cb-gated').checked = !!p.gated;
-  document.getElementById('cb-loop').checked = !!p.loop;
-  document.getElementById('cb-algo').checked = p.algo !== false;
-  document.getElementById('expr-n').value = p.n || '';
-  document.getElementById('expr-v').value = p.v || '';
-  document.getElementById('expr-t').value = p.et || '';
-  document.getElementById('expr-g').value = p.eg || '';
-  document.getElementById('offsets').value = p.offsets || '0,12,7,12';
-  document.getElementById('levels').value = p.levels || '1,0.7,0.5,0.3';
-  document.getElementById('expr-frame').value = p.frame || '';
-  document.getElementById('expr-end').value = p.end || 'v<=0';
-  document.getElementById('seed-input').value = p.seed || '';
-  syncModeButtons();
-  if (p.en) { Object.assign(exprEnabled, p.en); }
-  syncExprToggles();
-  /* Restore param expressions */
-  activeParams.seq = p.params && p.params.seq ? { ...p.params.seq } : {};
-  activeParams.elem = p.params && p.params.elem ? { ...p.params.elem } : {};
-  renderParamRows();
-  if (skipDSL) {
-    /* Just build the DSL display and fetch server state — don't push */
-    document.getElementById('dsl-output').value = buildDSL();
-    schedulePreview();
-  } else {
-    simulate();
+function parseDSLToForm(dsl) {
+  /* Parse DSL string back into form fields */
+  const parts = dsl.split(';').map(s => s.trim()).filter(Boolean);
+  /* Reset form to defaults */
+  document.getElementById('step-t').value = '0.125';
+  document.getElementById('gate-t').value = '';
+  document.getElementById('cb-gated').checked = false;
+  document.getElementById('cb-loop').checked = false;
+  document.getElementById('cb-algo').checked = false;
+  document.getElementById('expr-n').value = '';
+  document.getElementById('expr-v').value = '';
+  document.getElementById('expr-t').value = '';
+  document.getElementById('expr-g').value = '';
+  document.getElementById('expr-frame').value = '';
+  document.getElementById('expr-end').value = '';
+  document.getElementById('seed-input').value = '';
+  exprEnabled.n = false; exprEnabled.v = false; exprEnabled.t = false; exprEnabled.g = false;
+  activeParams.seq = {}; activeParams.elem = {};
+
+  for (const part of parts) {
+    if (part === 'gated') { document.getElementById('cb-gated').checked = true; }
+    else if (part === 'loop') { document.getElementById('cb-loop').checked = true; }
+    else if (part === 'algo') { document.getElementById('cb-algo').checked = true; }
+    else if (part.startsWith('t') && !part.includes(':')) { document.getElementById('step-t').value = part.slice(1); }
+    else if (part.startsWith('g') && !part.includes(':') && part !== 'gated') { document.getElementById('gate-t').value = part.slice(1); }
+    else if (part.startsWith('n:')) { document.getElementById('expr-n').value = part.slice(2); exprEnabled.n = true; }
+    else if (part.startsWith('v:') && part.length > 2 && !/^\d/.test(part[2])) { document.getElementById('expr-v').value = part.slice(2); exprEnabled.v = true; }
+    else if (part.startsWith('t:')) { document.getElementById('expr-t').value = part.slice(2); exprEnabled.t = true; }
+    else if (part.startsWith('g:')) { document.getElementById('expr-g').value = part.slice(2); exprEnabled.g = true; }
+    else if (part.startsWith('frame:')) { document.getElementById('expr-frame').value = part.slice(6); }
+    else if (part.startsWith('end:')) { document.getElementById('expr-end').value = part.slice(4); }
+    else if (part.startsWith('seed:')) { document.getElementById('seed-input').value = part.slice(5); }
   }
+  syncModeButtons();
+  syncExprToggles();
+  renderParamRows();
 }
 
 /* Rename */
-document.getElementById('preset-name').addEventListener('input', (e) => {
-  presets[activeIdx].label = e.target.value;
-  savePresets();
-  buildPresetBar();
+document.getElementById('preset-name').addEventListener('change', (e) => {
+  const newName = e.target.value.trim();
+  if (!newName || newName === activePreset) return;
+  if (!activePreset) return;
+  postAPI({type:'keyseq_preset_rename', name:activePreset, new_name:newName}).then(() => {
+    activePreset = newName;
+    loadServerPresets();
+  }).catch(() => {});
 });
 
-/* Duplicate */
+/* Save / Duplicate */
 document.getElementById('preset-add').addEventListener('click', () => {
-  autoSave();
-  const src = presets[activeIdx];
-  const dup = JSON.parse(JSON.stringify(src));
-  dup.key = 'custom_' + Date.now();
-  dup.label = src.label + ' copy';
-  presets.push(dup);
-  activeIdx = presets.length - 1;
-  savePresets(); saveActiveIdx();
-  buildPresetBar();
-  applyPreset(dup);
+  const dsl = document.getElementById('dsl-output').value.trim();
+  if (!dsl) return;
+  const name = document.getElementById('preset-name').value.trim() || 'Preset ' + (presets.length + 1);
+  postAPI({type:'keyseq_preset_save', name, dsl}).then(() => {
+    activePreset = name;
+    loadServerPresets();
+  }).catch(() => {});
 });
 
 /* Delete */
 document.getElementById('preset-del').addEventListener('click', () => {
-  if (presets.length <= 1) return;
-  if (!confirm(`Delete "${presets[activeIdx].label}"?`)) return;
-  presets.splice(activeIdx, 1);
-  if (activeIdx >= presets.length) activeIdx = presets.length - 1;
-  savePresets(); saveActiveIdx();
-  buildPresetBar();
-  applyPreset(presets[activeIdx]);
+  if (!activePreset) return;
+  if (!confirm(`Delete "${activePreset}"?`)) return;
+  postAPI({type:'keyseq_preset_delete', name:activePreset}).then(() => {
+    activePreset = '';
+    document.getElementById('preset-name').value = '';
+    loadServerPresets();
+  }).catch(() => {});
 });
+
+function presetContextMenu(name) {
+  const action = prompt(`"${name}"\n\nr = rename\nd = delete`);
+  if (!action) return;
+  if (action.toLowerCase() === 'd') {
+    if (!confirm(`Delete "${name}"?`)) return;
+    postAPI({type:'keyseq_preset_delete', name}).then(() => loadServerPresets()).catch(() => {});
+  } else if (action.toLowerCase() === 'r') {
+    const nn = prompt('New name:', name);
+    if (!nn || !nn.trim() || nn.trim() === name) return;
+    postAPI({type:'keyseq_preset_rename', name, new_name:nn.trim()}).then(() => loadServerPresets()).catch(() => {});
+  }
+}
 
 /* ── Track last focused expression input for param insertion ── */
 let lastExprField = null;
@@ -566,29 +582,7 @@ function buildDSL() {
   return parts.join('; ');
 }
 
-/* ── Expression eval ── */
-/* Simplex noise (JS port for preview) */
-const _p = [151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,190,6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,88,237,149,56,87,174,20,125,136,171,168,68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,200,196,135,130,116,188,159,86,164,100,109,198,173,186,3,64,52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,223,183,170,213,119,248,152,2,44,154,163,70,221,153,101,155,167,43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,157,184,84,204,176,115,121,50,45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180];
-const perm = [..._p,..._p];
-function _noise2d(x,y){const F=0.3660254,G=0.2113249;let s=(x+y)*F,i=Math.floor(x+s),j=Math.floor(y+s),tt=(i+j)*G,x0=x-(i-tt),y0=y-(j-tt),i1=x0>y0?1:0,j1=x0>y0?0:1,x1=x0-i1+G,y1=y0-j1+G,x2=x0-1+2*G,y2=y0-1+2*G,ii=i&255,jj=j&255;function gr(h,a,b){h&=7;let u=h<4?a:b,vv=h<4?b:a;return((h&1)?-u:u)+((h&2)?-2*vv:2*vv)}let n0=0,n1=0,n2=0,t0=.5-x0*x0-y0*y0;if(t0>0){t0*=t0;n0=t0*t0*gr(perm[ii+perm[jj]],x0,y0)}let t1=.5-x1*x1-y1*y1;if(t1>0){t1*=t1;n1=t1*t1*gr(perm[ii+i1+perm[jj+j1]],x1,y1)}let t2=.5-x2*x2-y2*y2;if(t2>0){t2*=t2;n2=t2*t2*gr(perm[ii+1+perm[jj+1]],x2,y2)}return 70*(n0+n1+n2)}
-let _noiseSeed = 0;
-function noise(x,y,z){const s=_noiseSeed;if(z!==undefined)return(_noise2d(x+s,y+s)+_noise2d(y+31.416+s,z+17.329+s)+_noise2d(z+47.853+s,x+11.721+s))/3;if(y!==undefined)return _noise2d(x+s,y+s);const xx=x+s;return _noise2d(xx,xx*0.7+13.37)}
-
-let _rs = 1;
-function rand() { _rs ^= _rs << 13; _rs ^= _rs >>> 17; _rs ^= _rs << 5; return (_rs & 0x7FFFFFFF) / 0x7FFFFFFF; }
-
-function evalExpr(src, ctx) {
-  if (!src || !src.trim()) return null;
-  try {
-    const _if = (c,a,b) => c ? a : b;
-    const fn = new Function('n','v','t','g','i','root','rv','time','bu','gate','held','dt',
-      'abs','sin','cos','rand','noise','pi','tau','_if',
-      'const if_=_if; return (' + src.replace(/\bif\s*\(/g, 'if_(') + ')');
-    return fn(ctx.n, ctx.v, ctx.t, ctx.g, ctx.i, ctx.root, ctx.rv,
-              ctx.time||0, ctx.bu||0, ctx.gate||0, ctx.held||0, ctx.dt||0.0000208,
-              Math.abs, Math.sin, Math.cos, rand, noise, Math.PI, Math.PI*2, _if);
-  } catch(e) { return null; }
-}
+/* Expression eval removed — all preview computation is server-side */
 
 /* ── Preview (server-authoritative) ── */
 let _pvTimer = null;
@@ -629,19 +623,9 @@ async function fetchPreview() {
 
 function renderPreview(data) {
   if (!data || !data.steps) return;
-  const exFrame = document.getElementById('expr-frame').value.trim();
-  const root = parseNoteName(document.getElementById('root-note').value);
-  const rv = (parseInt(document.getElementById('root-vel').value) || 100) / 127;
-
-  /* Sync seed so frame eval uses the same noise as the C engine */
-  if (data.seed != null) {
-    _rs = (data.seed | 1) >>> 0;
-    _noiseSeed = data.seed * 0.01;
-  }
 
   /* Sync server state into UI */
   if (data.bpm) document.getElementById('bpm-input').value = Math.round(data.bpm);
-  /* Only sync server DSL if local textarea is empty (initial load) */
   if (data.dsl && !document.getElementById('dsl-output').value.trim()) {
     document.getElementById('dsl-output').value = data.dsl;
   }
@@ -651,13 +635,8 @@ function renderPreview(data) {
   document.getElementById('preview-stats').textContent = `${data.total_beats.toFixed(2)}B ${data.total_steps}S ${flags}`;
   let html = `<div class="pv-header"><span class="pv-col-i">#</span><span class="pv-col-n">note</span><span class="pv-col-v">vel</span><span class="pv-col-t">t</span><span class="pv-col-g">g</span><span class="pv-col-b">beat</span><span class="pv-col-x"></span></div>`;
   for (const s of data.steps) {
-    let frameCents = null;
-    if (exFrame) {
-      frameCents = evalFrameAt(exFrame, {
-        n: s.n, v: s.v, t: s.t, g: s.g, i: s.i, root, rv
-      }, s.beat);
-    }
-    html += line(s.i, s.n, s.cents, s.v, s.t, s.g, s.beat, frameCents);
+    const fc = (s.frame_cents != null && s.frame_cents !== 0) ? s.frame_cents : null;
+    html += line(s.i, s.n, s.cents, s.v, s.t, s.g, s.beat, fc);
   }
 
   /* Footer */
@@ -670,17 +649,6 @@ function renderPreview(data) {
 
   document.getElementById('preview').innerHTML = html;
   updateParamIndex();
-}
-
-/* Evaluate frame expr at a given time offset (for preview snapshot) */
-function evalFrameAt(exFrame, ctx, beatPos) {
-  if (!exFrame) return null;
-  const bpm = parseInt(document.getElementById('bpm-input').value) || 120;
-  const gateSec = ctx.g * 60 / bpm;
-  /* Snapshot at mid-gate for preview purposes */
-  const gateProgress = gateSec > 0 ? 0.5 : 0;
-  const fc = { ...ctx, time: beatPos * 60 / bpm, bu: 0.5, gate: gateProgress };
-  return evalExpr(exFrame, fc);
 }
 
 function line(i, rawN, nCents, vel, t, g, beat, frameCents) {
@@ -701,10 +669,8 @@ async function fetchSpec() {
     const r = await postAPI({type:'keyseq_spec', channel:activeCh});
     const spec = await r.json();
 
-    /* Cache static instrument schemas (only on first call) */
-    if (spec.instruments && !Object.keys(instSchemas).length) {
-      instSchemas = spec.instruments;
-    }
+    /* Cache static instrument schemas */
+    if (spec.instruments) instSchemas = spec.instruments;
 
     /* Cache expression language info */
     if (spec.variables) specVars = spec.variables;
@@ -723,10 +689,27 @@ async function fetchSpec() {
     const hintElem = document.querySelector('#frame-section > p');
     if (hintElem) hintElem.textContent = `${varStr}  ${fnStr} ${constStr}  returns cents offset`;
 
-    /* Update channel instrument + current values */
-    updateParamIndex(spec.active_instrument, spec.current_values);
+    /* Update channel instrument + param index with flat values */
+    const instName = spec.active_instrument || '';
+    const flatVals = [];
+    if (instName && instSchemas[instName]) {
+      instSchemas[instName].params.forEach(p => {
+        if (spec[p.name] !== undefined) flatVals.push({ name: p.name, value: spec[p.name] });
+      });
+    }
+    updateParamIndex(instName, flatVals);
+
+    /* Sync keyseq state from server on channel load */
+    if (spec.keyseq) {
+      const ks = spec.keyseq;
+      const tog = document.getElementById('seq-enable');
+      if (tog) tog.classList.toggle('on', !!ks.enabled);
+      /* If server has a DSL loaded and our textarea is empty, populate from server */
+      if (ks.dsl && !document.getElementById('dsl-output').value.trim()) {
+        document.getElementById('dsl-output').value = ks.dsl;
+      }
+    }
   } catch(e) {
-    /* Spec endpoint not available — fall back to updateParamIndex from rack data */
     updateParamIndex();
   }
 }
@@ -893,6 +876,11 @@ function connectSSE() {
     rackSlots = d.slots;
     updateChLabel();
 
+    /* Sync BPM from server */
+    if (d.bpm && document.activeElement !== document.getElementById('bpm-input')) {
+      document.getElementById('bpm-input').value = Math.round(d.bpm);
+    }
+
     /* Sync MIDI device — authoritative from server */
     const sel = document.getElementById('midi-select');
     const serverDev = d.midi_device || '';
@@ -922,6 +910,9 @@ function connectSSE() {
 
   es.addEventListener('keyseq_trigger', () => {
     fetchPreview();
+    /* Keyseq just fired — it's enabled */
+    const tog = document.getElementById('seq-enable');
+    if (tog && !tog.classList.contains('on')) { tog.classList.add('on'); tog.textContent = 'ON'; }
   });
 
   es.onerror = () => {
@@ -948,12 +939,14 @@ document.getElementById('tap-btn').addEventListener('click', () => {
     const avg = total / (tapTimes.length - 1);
     const bpm = Math.round(60000 / avg);
     document.getElementById('bpm-input').value = bpm;
-    /* BPM doesn't go into preset data — it's global runtime state */
+    postAPI({type:'bpm', value:bpm}).catch(() => {});
   }
 });
 
 document.getElementById('bpm-input').addEventListener('input', () => {
   tapTimes = [];
+  const v = parseInt(document.getElementById('bpm-input').value);
+  if (v > 0) postAPI({type:'bpm', value:v}).catch(() => {});
 });
 
 /* ── Arrow key double/half for numeric inputs ── */
@@ -975,11 +968,11 @@ for (const id of ['step-t','gate-t','expr-n','expr-v','expr-t','expr-g','expr-fr
 }
 
 /* ── Init ── */
-loadState();
-buildPresetBar();
-applyPreset(presets[activeIdx], true);
+loadState(); /* just loads activeCh from localStorage */
 updateChLabel();
 fetchSpec();
+loadServerPresets();
+schedulePreview();
 </script>
 </body>
 </html>
