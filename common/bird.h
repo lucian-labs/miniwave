@@ -123,6 +123,13 @@ static void bird_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
         case 14: /* rate — chirp speed */
             s->chirp_dur = 0.5f * powf(0.04f, cc); /* 0.5s → 0.02s */
             s->gap_dur = s->chirp_dur * 0.6f;
+            /* Update active voices live — no retrigger */
+            for (int vi = 0; vi < BIRD_MAX_VOICES; vi++) {
+                if (s->voices[vi].active) {
+                    s->voices[vi].chirp_dur = s->chirp_dur;
+                    s->voices[vi].gap_dur = s->gap_dur;
+                }
+            }
             break;
         case 15: /* drop — pitch sweep, bipolar */
             s->drop_semi = (cc - 0.5f) * 48.0f; /* -24 to +24 semi */

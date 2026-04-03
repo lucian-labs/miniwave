@@ -125,6 +125,7 @@ typedef struct {
 
     /* Envelope */
     float attack, decay, sustain, release;
+    float shape;            /* 0=pluck, 0.5=balanced, 1=pad — stored for UI */
 
     /* Output */
     float volume;
@@ -302,7 +303,15 @@ static void additive_note_on(AdditiveState *s, int note, int vel) {
     for (int i = 0; i < ADD_MAX_VOICES; i++)
         if (!s->voices[i].active) { vi = i; break; }
     if (vi < 0) {
+        /* Steal oldest voice (longest env_time) */
+        float oldest = 0;
         vi = 0;
+        for (int i = 0; i < ADD_MAX_VOICES; i++) {
+            if (s->voices[i].env_time > oldest) {
+                oldest = s->voices[i].env_time;
+                vi = i;
+            }
+        }
         s->voices[vi].killing = 1;
         s->voices[vi].kill_pos = 0;
     }
@@ -410,6 +419,7 @@ static void additive_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
             break;
         case 20: { /* shape — combined attack/decay/sustain macro */
             /* 0=sharp pluck, 0.5=balanced, 1=slow pad */
+            s->shape = cc;
             s->attack = 0.001f * powf(3000.0f, cc);
             s->decay = 0.05f + (1.0f - cc) * 2.0f;
             s->sustain = cc * cc;
@@ -583,12 +593,12 @@ static int additive_json_status(void *state, char *buf, int max) {
         "\"mode\":\"%s\",\"mode_index\":%d,"
         "\"harmonics\":%d,\"active_voices\":%d,"
         "\"ratio\":%.4f,\"spread\":%.4f,\"rolloff\":%.4f,"
-        "\"inharmonicity\":%.4f,\"release\":%.4f,"
+        "\"inharmonicity\":%.4f,\"shape\":%.4f,\"release\":%.4f,"
         "\"volume\":%.4f",
         mode_names[s->mode], s->mode, s->num_harmonics, active,
         (double)s->cluster_ratio, (double)s->cluster_spread,
         (double)s->cluster_rolloff, (double)s->metal_inharmonicity,
-        (double)s->release, (double)s->volume);
+        (double)s->shape, (double)s->release, (double)s->volume);
     return pos;
 }
 

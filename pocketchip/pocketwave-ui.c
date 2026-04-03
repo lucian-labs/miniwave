@@ -170,27 +170,33 @@ static const KnobMap KNOB_MAPS[][8] = {
     /* additive: MODE HARM RATIO SPRD ROLL CHAR SHPE REL */
     {{"mode_index",0,5,0}, {"harmonics",1,64,0}, {"ratio",0.25f,4,1},
      {"spread",0,3,0}, {"rolloff",0.05f,1,0}, {"inharmonicity",0,1,0},
-     {NULL,0,1,0}, {"release",0.01f,8,1}},
+     {"shape",0,1,0}, {"release",0.01f,8,1}},
     /* phase-dist: DIST TMBR MODE COLR ATK DEC SUS REL */
     {{"distortion",0,1,0}, {"timbre",0,1,0}, {"mode_index",0,5,0},
      {"color",0,1,0}, {"attack",0.001f,3,1}, {"decay",0.01f,5,1},
      {"sustain",0,1,0}, {"release",0.01f,5,1}},
     /* bird: RATE DROP CURV VDEP VRAT BUZZ SHPE GAP */
-    {{"chirp_dur",0.02f,0.5f,1}, {"drop_semi",-24,24,0}, {"curve",0.2f,6,0},
+    {{"chirp_dur",0.5f,0.02f,1}, {"drop_semi",-24,24,0}, {"curve",0.2f,6,0},
      {"vib_depth",0,4,0}, {"vib_rate",2,60,1}, {"buzz",0,1,0},
      {"chirp_shape",0,1,0}, {"gap_dur",0,2,0}},
 };
 
 static int param_to_knob(float val, const KnobMap *m) {
-    if (m->log_scale && m->min > 0 && m->max > 0) {
-        float lmin = logf(m->min), lmax = logf(m->max);
-        float lval = logf(val < m->min ? m->min : val);
-        float t = (lval - lmin) / (lmax - lmin);
-        if (t < 0) t = 0; if (t > 1) t = 1;
-        return (int)(t * 127);
+    float lo = m->min, hi = m->max;
+    /* Inverted range (e.g. rate: 0.5→0.02 means knob 0=slow, 127=fast) */
+    int invert = (lo > hi);
+    if (invert) { float tmp = lo; lo = hi; hi = tmp; }
+
+    float t;
+    if (m->log_scale && lo > 0 && hi > 0) {
+        float lmin = logf(lo), lmax = logf(hi);
+        float lval = logf(val < lo ? lo : val);
+        t = (lval - lmin) / (lmax - lmin);
+    } else {
+        t = (val - lo) / (hi - lo);
     }
-    float t = (val - m->min) / (m->max - m->min);
     if (t < 0) t = 0; if (t > 1) t = 1;
+    if (invert) t = 1.0f - t;
     return (int)(t * 127);
 }
 
