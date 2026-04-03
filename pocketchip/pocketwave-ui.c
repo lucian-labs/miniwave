@@ -168,11 +168,11 @@ static const KnobMap KNOB_MAPS[][8] = {
      {"pitch_sweep",-400,400,0}, {"decay",0.01f,2,1}, {"noise_amt",0,1,0},
      {"click_amt",0,1,0}, {"feedback",0,1,0}},
     /* additive: MODE HARM RATIO SPRD ROLL CHAR SHPE REL */
-    {{"mode",0,5,0}, {"harmonics",1,64,0}, {"ratio",0.25f,4,1},
+    {{"mode_index",0,5,0}, {"harmonics",1,64,0}, {"ratio",0.25f,4,1},
      {"spread",0,3,0}, {"rolloff",0.05f,1,0}, {"inharmonicity",0,1,0},
-     {"shape",0,1,0}, {"release",0.01f,8,1}},
+     {NULL,0,1,0}, {"release",0.01f,8,1}},
     /* phase-dist: DIST TMBR MODE COLR ATK DEC SUS REL */
-    {{"distortion",0,1,0}, {"timbre",0,1,0}, {"mode",0,5,0},
+    {{"distortion",0,1,0}, {"timbre",0,1,0}, {"mode_index",0,5,0},
      {"color",0,1,0}, {"attack",0.001f,3,1}, {"decay",0.01f,5,1},
      {"sustain",0,1,0}, {"release",0.01f,5,1}},
     /* bird: RATE DROP CURV VDEP VRAT BUZZ SHPE GAP */
@@ -298,15 +298,57 @@ static int http_poll_rack(int *out_type_idx, int *out_preset, char *out_preset_n
 
 
 
-/* pw-knobs listener removed — HTTP poll gets real param values from miniwave */
+/* ── HTTP fetch helper ────────────────────────────────────────────── */
+
+static int http_fetch(const char *post_body, char *out, int max) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return -1;
+    struct timeval tv = { .tv_sec = 0, .tv_usec = 200000 };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8080);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        close(sock); return -1;
+    }
+    char req[256];
+    int rlen = snprintf(req, sizeof(req),
+        "POST /api HTTP/1.0\r\nContent-Type: application/json\r\n"
+        "Content-Length: %d\r\n\r\n%s",
+        (int)strlen(post_body), post_body);
+    write(sock, req, (size_t)rlen);
+    int total = 0;
+    while (total < max - 1) {
+        int n = (int)read(sock, out + total, (size_t)(max - 1 - total));
+        if (n <= 0) break;
+        total += n;
+    }
+    out[total] = '\0';
+    close(sock);
+    char *body = strstr(out, "\r\n\r\n");
+    if (body) { body += 4; memmove(out, body, strlen(body) + 1); }
+    return (int)strlen(out);
+}
+
+/* System info cache — updated on MODE_SYSTEM entry */
+static char g_sys_midi_dev[64] = "";
+static char g_sys_audio[32] = "";
+static int  g_sys_voices = 0;
+static int  g_sys_bpm = 120;
 
 /* ── UI modes ──────────────────────────────────────────────────────── */
 
 enum {
-    MODE_MAIN,
+    MODE_MAIN,       /* synth + knob bars (default play mode) */
+    MODE_SYSTEM,     /* tab: system info — audio, midi, cpu, memory */
+    MODE_MONITOR,    /* M: midi/peripheral monitor */
+    MODE_SYNTH,      /* S: synth detail — knob mappings, config */
     MODE_HELP,
     MODE_CONFIG,
-    MODE_MIDI_MON,
+    MODE_MIDI_MON,   /* legacy — will merge into MODE_MONITOR */
     MODE_QUIT
 };
 
@@ -655,7 +697,9 @@ static void render(void) {
             " \033[33mup/dn\033[0m synth\n"
             " \033[33mlf/rt\033[0m preset\n"
             " \033[33m+ -\033[0m   vol\n"
-            " \033[33mtab\033[0m   config\n"
+            " \033[33mtab\033[0m   system\n"
+            " \033[33mm\033[0m     mono\n"
+            " \033[33ml\033[0m     legato\n"
             " \033[33m?\033[0m     help\n"
             " \033[33mesc\033[0m   back/quit\n");
         break;
@@ -722,6 +766,85 @@ static void render(void) {
                 p += snprintf(out + p, sizeof(out) - (size_t)p, "\n");
         }
         break;
+
+    case MODE_SYSTEM: {
+        /* System info — audio, midi, engine status */
+        char rbuf[2048];
+        if (http_fetch("{\"type\":\"rack_status\"}", rbuf, (int)sizeof(rbuf)) > 0) {
+            char *p2;
+            if ((p2 = strstr(rbuf, "\"midi_device\":\""))) {
+                p2 += 15; char *e = strchr(p2, '"');
+                if (e) { int l = (int)(e-p2); if(l>63)l=63; memcpy(g_sys_midi_dev,p2,(size_t)l); g_sys_midi_dev[l]=0; }
+            }
+            if ((p2 = strstr(rbuf, "\"audio_backend\":\""))) {
+                p2 += 17; char *e = strchr(p2, '"');
+                if (e) { int l = (int)(e-p2); if(l>31)l=31; memcpy(g_sys_audio,p2,(size_t)l); g_sys_audio[l]=0; }
+            }
+        }
+        p += snprintf(out + p, sizeof(out) - (size_t)p,
+            "\033[36m SYSTEM\033[0m\n"
+            "\033[33mAUDIO\033[0m %s\n"
+            "\033[33mMIDI \033[0m %s\n"
+            "\033[33mCPU  \033[0m %d%%\n"
+            "\033[33mBATT \033[0m %d%%%s\n"
+            "\033[33mSYNTH\033[0m %s\n"
+            "\033[33mPREST\033[0m %d\n"
+            "\n"
+            "\033[90mM\033[0m monitor "
+            "\033[90mS\033[0m synth "
+            "\033[90mESC\033[0m back",
+            g_sys_audio,
+            g_sys_midi_dev[0] ? g_sys_midi_dev : "none",
+            g_cpu,
+            g_batt_pct >= 0 ? g_batt_pct : 0,
+            g_batt_charging ? "+" : "",
+            SYNTH_LABELS[g_type_idx],
+            g_preset);
+        break;
+    }
+
+    case MODE_MONITOR:
+        p += snprintf(out + p, sizeof(out) - (size_t)p,
+            "\033[36m MONITOR\033[0m\n\n");
+        /* Reuse the midi monitor log */
+        for (int i = 0; i < MIDI_LOG_LINES; i++) {
+            int idx = (g_midi_log_pos - MIDI_LOG_LINES + i);
+            if (idx < 0) idx += MIDI_LOG_LINES * 100;
+            idx = idx % MIDI_LOG_LINES;
+            if (g_midi_log[idx][0])
+                p += snprintf(out + p, sizeof(out) - (size_t)p,
+                    " %s\n", g_midi_log[idx]);
+            else
+                p += snprintf(out + p, sizeof(out) - (size_t)p, "\n");
+        }
+        p += snprintf(out + p, sizeof(out) - (size_t)p,
+            "\033[90mESC\033[0m back");
+        break;
+
+    case MODE_SYNTH: {
+        const char **kn = KNOB_LABELS[g_type_idx];
+        const KnobMap *maps = KNOB_MAPS[g_type_idx];
+        p += snprintf(out + p, sizeof(out) - (size_t)p,
+            "\033[36m SYNTH\033[0m %s\n",
+            SYNTH_LABELS[g_type_idx]);
+        for (int ki = 0; ki < 8; ki++) {
+            float val = 0;
+            if (maps[ki].key) {
+                /* reverse map knob value back to param */
+                float t = (float)g_knob_vals[ki] / 127.0f;
+                if (maps[ki].log_scale && maps[ki].min > 0)
+                    val = maps[ki].min * powf(maps[ki].max / maps[ki].min, t);
+                else
+                    val = maps[ki].min + t * (maps[ki].max - maps[ki].min);
+            }
+            p += snprintf(out + p, sizeof(out) - (size_t)p,
+                "\033[33m%d \033[36m%-7s\033[32m%.3g\033[0m\n",
+                ki + 1, kn[ki], (double)val);
+        }
+        p += snprintf(out + p, sizeof(out) - (size_t)p,
+            "\033[90mESC\033[0m back");
+        break;
+    }
 
     case MODE_MAIN:
     default:
@@ -884,8 +1007,8 @@ int main(int argc, char *argv[]) {
         int dirty = 0;
 
         /* poll MIDI monitor if active */
-        if (g_mode == MODE_MIDI_MON) {
-            if (midi_mon_poll()) dirty = 1;
+        if (g_mode == MODE_MIDI_MON || g_mode == MODE_MONITOR) {
+            if (g_midi_seq && midi_mon_poll()) dirty = 1;
         }
 
         /* poll knob CCs for bar display */
@@ -907,20 +1030,51 @@ int main(int argc, char *argv[]) {
                 dirty = 1;
             }
 
+            /* TAB — enter system view */
+            if (n == 1 && seq[0] == '\t' && g_mode == MODE_MAIN) {
+                g_mode = MODE_SYSTEM; dirty = 1; continue;
+            }
+
             /* ESC (bare, n==1) — go back */
             if (n == 1 && seq[0] == '\033') {
                 switch (g_mode) {
+                case MODE_SYSTEM:
+                case MODE_SYNTH:
+                case MODE_MONITOR:
                 case MODE_HELP:
                 case MODE_CONFIG:
                     g_mode = MODE_MAIN; dirty = 1; break;
                 case MODE_MIDI_MON:
                     midi_mon_close();
-                    g_mode = MODE_CONFIG; dirty = 1; break;
+                    g_mode = MODE_SYSTEM; dirty = 1; break;
                 case MODE_QUIT:
                     g_mode = MODE_MAIN; dirty = 1; break;
                 case MODE_MAIN:
                     g_mode = MODE_QUIT; dirty = 1; break;
                 }
+                continue;
+            }
+
+            /* Keys in system view */
+            if (g_mode == MODE_SYSTEM) {
+                if (n == 1 && (seq[0] == 'm' || seq[0] == 'M')) {
+                    /* Enter monitor — open midi seq if not open */
+                    if (!g_midi_seq) midi_mon_open();
+                    g_mode = MODE_MONITOR; dirty = 1; continue;
+                }
+                if (n == 1 && (seq[0] == 's' || seq[0] == 'S')) {
+                    g_mode = MODE_SYNTH; dirty = 1; continue;
+                }
+                if (n == 1 && (seq[0] == 'c' || seq[0] == 'C')) {
+                    g_mode = MODE_CONFIG; dirty = 1; continue;
+                }
+                continue;
+            }
+
+            /* Keys in monitor — poll midi */
+            if (g_mode == MODE_MONITOR) {
+                if (!g_midi_seq) midi_mon_open();
+                if (midi_mon_poll()) dirty = 1;
                 continue;
             }
 

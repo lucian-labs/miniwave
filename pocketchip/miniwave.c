@@ -244,8 +244,11 @@ static inline void seq_dispatch(snd_seq_event_t *ev) {
                        ev->type == SND_SEQ_EVENT_CHANPRESS ||
                        ev->type == SND_SEQ_EVENT_PGMCHANGE);
 
-        if (src_port == MPK_PORT_MIDI && !(is_note || is_perf))
-            return;
+        /* MIDI port: notes, performance, + CC1 (mod wheel) */
+        if (src_port == MPK_PORT_MIDI && !(is_note || is_perf)) {
+            if (!(is_cc && ev->data.control.param == 1))
+                return;
+        }
         if (src_port == MPK_PORT_DAW && !is_cc)
             return;
         if (src_port != MPK_PORT_MIDI && src_port != MPK_PORT_DAW)

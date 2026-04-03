@@ -264,9 +264,11 @@ static inline void seq_dispatch(snd_seq_event_t *ev) {
                        ev->type == SND_SEQ_EVENT_CHANPRESS ||
                        ev->type == SND_SEQ_EVENT_PGMCHANGE);
 
-        /* MIDI port → notes + performance only */
-        if (src_port == MPK_PORT_MIDI && !(is_note || is_perf))
-            return;
+        /* MIDI port: notes, performance, + CC1 (mod wheel) */
+        if (src_port == MPK_PORT_MIDI && !(is_note || is_perf)) {
+            if (!(is_cc && ev->data.control.param == 1))
+                return;
+        }
         /* DAW port → CCs only */
         if (src_port == MPK_PORT_DAW && !is_cc)
             return;
@@ -292,9 +294,25 @@ static inline void seq_dispatch(snd_seq_event_t *ev) {
             return;
         }
 
-        /* CC15/16: preset bank down/up (val=127 press, val=0 release) */
+        /* CC15/16: preset down/up (val=127 press, val=0 release) */
         if ((param == 15 || param == 16) && val == 127) {
-            /* TODO: cycle patches */
+            RackSlot *slot = &g_rack.slots[ch];
+            if (slot->active && slot->state) {
+                InstrumentType *itype = g_type_registry[slot->type_idx];
+                /* Send program change ±1 to the instrument */
+                /* Read current preset from FM synth state, or use 0 */
+                int cur = 0;
+                if (strcmp(itype->name, "fm-synth") == 0)
+                    cur = ((FMSynth *)slot->state)->current_preset;
+                int next_p = cur + (param == 16 ? 1 : -1);
+                if (next_p < 0) next_p = 98;
+                if (next_p > 98) next_p = 0;
+                itype->midi(slot->state,
+                            (uint8_t)(0xC0 | ch),
+                            (uint8_t)next_p, 0);
+                midi_push_ch_status(ch);
+                fprintf(stderr, "[miniwave] ch%d preset → %d\n", ch, next_p);
+            }
             return;
         }
 

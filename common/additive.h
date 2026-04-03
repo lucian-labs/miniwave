@@ -581,8 +581,14 @@ static int additive_json_status(void *state, char *buf, int max) {
     pos += snprintf(buf + pos, (size_t)(max - pos),
         "\"instrument_type\":\"additive\","
         "\"mode\":\"%s\",\"mode_index\":%d,"
-        "\"harmonics\":%d,\"active_voices\":%d",
-        mode_names[s->mode], s->mode, s->num_harmonics, active);
+        "\"harmonics\":%d,\"active_voices\":%d,"
+        "\"ratio\":%.4f,\"spread\":%.4f,\"rolloff\":%.4f,"
+        "\"inharmonicity\":%.4f,\"release\":%.4f,"
+        "\"volume\":%.4f",
+        mode_names[s->mode], s->mode, s->num_harmonics, active,
+        (double)s->cluster_ratio, (double)s->cluster_spread,
+        (double)s->cluster_rolloff, (double)s->metal_inharmonicity,
+        (double)s->release, (double)s->volume);
     return pos;
 }
 
