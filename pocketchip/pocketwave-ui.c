@@ -762,18 +762,14 @@ static void render(void) {
         {
             const char **kn = KNOB_LABELS[g_type_idx];
             for (int ki = 0; ki < 8; ki++) {
-                int fill = g_knob_vals[ki] * 8 / 127;
+                int fill = g_knob_vals[ki] * 30 / 127;
                 if (fill < 0) fill = 0;
-                if (fill > 8) fill = 8;
-                /* bars grow left, label on right */
-                int empty = 8 - fill;
-                p += snprintf(out + p, sizeof(out) - (size_t)p, "\033[32m");
-                for (int b = 0; b < empty; b++)
-                    p += snprintf(out + p, sizeof(out) - (size_t)p, " ");
+                if (fill > 30) fill = 30;
+                p += snprintf(out + p, sizeof(out) - (size_t)p,
+                    "\033[36m%-8s\033[32m", kn[ki]);
                 for (int b = 0; b < fill; b++)
                     p += snprintf(out + p, sizeof(out) - (size_t)p, "#");
-                p += snprintf(out + p, sizeof(out) - (size_t)p,
-                    " \033[36m%s\033[0m", kn[ki]);
+                p += snprintf(out + p, sizeof(out) - (size_t)p, "\033[0m");
                 if (ki < 7) p += snprintf(out + p, sizeof(out) - (size_t)p, "\n");
             }
         }
