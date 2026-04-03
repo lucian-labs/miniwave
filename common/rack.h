@@ -291,8 +291,14 @@ static int rack_set_slot(int channel, const char *type_name) {
         if (old_type->json_save) {
             int n = old_type->json_save(old_state,
                         slot->state_cache[old_type_idx],
-                        (int)sizeof(slot->state_cache[old_type_idx]));
-            slot->state_cache_valid[old_type_idx] = (n > 0) ? 1 : 0;
+                        SLOT_CACHE_SIZE);
+            if (n > 0 && n < SLOT_CACHE_SIZE) {
+                slot->state_cache_valid[old_type_idx] = 1;
+            } else {
+                slot->state_cache_valid[old_type_idx] = 0;
+                fprintf(stderr, "[miniwave] WARN: state cache overflow for %s (%d bytes)\n",
+                        old_type->name, n);
+            }
         }
     }
 

@@ -85,8 +85,9 @@ typedef struct {
     float            vibrato_phase;    /* LFO phase accumulator */
 
     /* State cache — preserves instrument params when cycling types */
-    #define SLOT_CACHE_TYPES 32
-    char             state_cache[SLOT_CACHE_TYPES][2048];
+    #define SLOT_CACHE_TYPES 8
+    #define SLOT_CACHE_SIZE  4096
+    char             state_cache[SLOT_CACHE_TYPES][SLOT_CACHE_SIZE];
     int              state_cache_valid[SLOT_CACHE_TYPES];
 
     /* Mono / Legato — per-slot */

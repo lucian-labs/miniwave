@@ -21,7 +21,7 @@ $(TARGET): $(SRC) $(COMMON_HDRS)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS)
 
 $(UI): pocketwave-ui.c
-	$(CC) $(CFLAGS) -o $@ $< -lasound
+	$(CC) $(CFLAGS) -o $@ $< -lasound -lm
 
 clean:
 	rm -f $(TARGET) $(UI)

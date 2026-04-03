@@ -138,6 +138,62 @@ static void update_battery(void) {
     }
 }
 
+/* ── Knob state + param mapping ───────────────────────────────────── */
+
+static int g_knob_vals[8] = {0}; /* 0-127, mapped from instrument params */
+
+typedef struct {
+    const char *key;
+    float min, max;
+    int log_scale;
+} KnobMap;
+
+#define NUM_TYPES 7
+
+static const KnobMap KNOB_MAPS[][8] = {
+    /* fm-synth: MOD RATIO CARR FDBK ATK DEC SUS REL */
+    {{"mod_index",0,30,0}, {"mod_ratio",0.5f,12,0}, {"carrier_ratio",0.5f,12,0},
+     {"feedback",0,2.5f,0}, {"attack",0.001f,3,1}, {"decay",0.01f,5,1},
+     {"sustain",0,1,0}, {"release",0.01f,5,1}},
+    /* ym2413: INST MODLV FDBK MATK MDEC CATK CDEC MMUL */
+    {{"instrument",0,15,0}, {"mod_tl",0,63,0}, {"feedback",0,7,0},
+     {"mod_attack",0,15,0}, {"mod_decay",0,15,0}, {"car_attack",0,15,0},
+     {"car_decay",0,15,0}, {"mod_mult",0,15,0}},
+    /* sub-synth: CUT RES WAVE PW FENV ATK SUS REL */
+    {{"filter_cutoff",20,20000,1}, {"filter_reso",0,1,0}, {"waveform",0,5,0},
+     {"pulse_width",0.05f,0.95f,0}, {"filter_env_depth",-1,1,0},
+     {"amp_attack",0.001f,5,1}, {"amp_sustain",0,1,0}, {"amp_release",0.001f,5,1}},
+    /* fm-drums: FREQ MFRQ MIDX SWEP DECY NOIS CLIK FDBK */
+    {{"carrier_freq",20,2000,1}, {"mod_freq",20,8000,1}, {"mod_index",0,10,0},
+     {"pitch_sweep",-400,400,0}, {"decay",0.01f,2,1}, {"noise_amt",0,1,0},
+     {"click_amt",0,1,0}, {"feedback",0,1,0}},
+    /* additive: MODE HARM RATIO SPRD ROLL CHAR SHPE REL */
+    {{"mode",0,5,0}, {"harmonics",1,64,0}, {"ratio",0.25f,4,1},
+     {"spread",0,3,0}, {"rolloff",0.05f,1,0}, {"inharmonicity",0,1,0},
+     {"shape",0,1,0}, {"release",0.01f,8,1}},
+    /* phase-dist: DIST TMBR MODE COLR ATK DEC SUS REL */
+    {{"distortion",0,1,0}, {"timbre",0,1,0}, {"mode",0,5,0},
+     {"color",0,1,0}, {"attack",0.001f,3,1}, {"decay",0.01f,5,1},
+     {"sustain",0,1,0}, {"release",0.01f,5,1}},
+    /* bird: RATE DROP CURV VDEP VRAT BUZZ SHPE GAP */
+    {{"chirp_dur",0.02f,0.5f,1}, {"drop_semi",-24,24,0}, {"curve",0.2f,6,0},
+     {"vib_depth",0,4,0}, {"vib_rate",2,60,1}, {"buzz",0,1,0},
+     {"chirp_shape",0,1,0}, {"gap_dur",0,2,0}},
+};
+
+static int param_to_knob(float val, const KnobMap *m) {
+    if (m->log_scale && m->min > 0 && m->max > 0) {
+        float lmin = logf(m->min), lmax = logf(m->max);
+        float lval = logf(val < m->min ? m->min : val);
+        float t = (lval - lmin) / (lmax - lmin);
+        if (t < 0) t = 0; if (t > 1) t = 1;
+        return (int)(t * 127);
+    }
+    float t = (val - m->min) / (m->max - m->min);
+    if (t < 0) t = 0; if (t > 1) t = 1;
+    return (int)(t * 127);
+}
+
 /* ── HTTP poll — sync state from miniwave API ─────────────────────── */
 
 static int http_poll_rack(int *out_type_idx, int *out_preset, char *out_preset_name, int name_max) {
@@ -219,67 +275,30 @@ static int http_poll_rack(int *out_type_idx, int *out_preset, char *out_preset_n
         *out_preset = atoi(pi + 15);
     }
 
-    return 0;
-}
-
-static int g_knob_vals[8] = {0}; /* 0-127, last seen CC values */
-
-/* ── Knob CC listener — passive ALSA seq tap for CC 24-31 ─────────── */
-
-static snd_seq_t *g_knob_seq = NULL;
-
-static void knob_listen_init(void) {
-    if (snd_seq_open(&g_knob_seq, "default", SND_SEQ_OPEN_INPUT, SND_SEQ_NONBLOCK) < 0) {
-        g_knob_seq = NULL;
-        return;
-    }
-    snd_seq_set_client_name(g_knob_seq, "pw-knobs");
-    int port = snd_seq_create_simple_port(g_knob_seq, "in",
-        SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE,
-        SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
-    if (port < 0) { snd_seq_close(g_knob_seq); g_knob_seq = NULL; return; }
-
-    /* Subscribe to all readable ports (same as miniwave does) */
-    snd_seq_client_info_t *cinfo;
-    snd_seq_port_info_t *pinfo;
-    snd_seq_client_info_alloca(&cinfo);
-    snd_seq_port_info_alloca(&pinfo);
-    int me = snd_seq_client_id(g_knob_seq);
-    snd_seq_client_info_set_client(cinfo, -1);
-    while (snd_seq_query_next_client(g_knob_seq, cinfo) >= 0) {
-        int c = snd_seq_client_info_get_client(cinfo);
-        if (c == me || c == 0) continue;
-        const char *cn = snd_seq_client_info_get_name(cinfo);
-        if (cn && strstr(cn, "Midi Through")) continue;
-        snd_seq_port_info_set_client(pinfo, c);
-        snd_seq_port_info_set_port(pinfo, -1);
-        while (snd_seq_query_next_port(g_knob_seq, pinfo) >= 0) {
-            unsigned int caps = snd_seq_port_info_get_capability(pinfo);
-            if (!(caps & SND_SEQ_PORT_CAP_READ)) continue;
-            if (!(caps & SND_SEQ_PORT_CAP_SUBS_READ)) continue;
-            snd_seq_connect_from(g_knob_seq, port, c,
-                                 snd_seq_port_info_get_port(pinfo));
-        }
-    }
-}
-
-static int knob_poll(void) {
-    if (!g_knob_seq) return 0;
-    int dirty = 0;
-    snd_seq_event_t *ev = NULL;
-    while (snd_seq_event_input(g_knob_seq, &ev) >= 0 && ev) {
-        if (ev->type == SND_SEQ_EVENT_CONTROLLER) {
-            int cc = ev->data.control.param;
-            int val = ev->data.control.value;
-            /* CC 24-31 = MPK knobs */
-            if (cc >= 24 && cc <= 31) {
-                g_knob_vals[cc - 24] = val;
-                dirty = 1;
+    /* Parse params → knob values */
+    if (*out_type_idx >= 0 && *out_type_idx < NUM_TYPES) {
+        const KnobMap *maps = KNOB_MAPS[*out_type_idx];
+        for (int k = 0; k < 8; k++) {
+            if (!maps[k].key) continue;
+            /* Find "key": in JSON */
+            char needle[48];
+            snprintf(needle, sizeof(needle), "\"%s\":", maps[k].key);
+            char *found = strstr(body, needle);
+            if (found) {
+                found += strlen(needle);
+                while (*found == ' ') found++;
+                float val = (float)atof(found);
+                g_knob_vals[k] = param_to_knob(val, &maps[k]);
             }
         }
     }
-    return dirty;
+
+    return 0;
 }
+
+
+
+/* pw-knobs listener removed — HTTP poll gets real param values from miniwave */
 
 /* ── UI modes ──────────────────────────────────────────────────────── */
 
@@ -299,17 +318,16 @@ static const char *SYNTH_TYPES[] = {
 static const char *SYNTH_LABELS[] = {
     "FM SYNTH", "YM2413", "SUB SYNTH", "FM DRUMS", "ADDITIVE", "PHASE DIST", "BIRD"
 };
-#define NUM_TYPES 7
 
-/* knob labels per synth, 8 knobs each (CC14-21) */
+/* knob labels per synth, 8 knobs each — max 6 chars */
 static const char *KNOB_LABELS[][8] = {
-    /* fm-synth */  {"MOD", "RATIO", "CARR", "FDBK", "ATK", "DEC", "SUS", "REL"},
-    /* ym2413 */    {"INST", "MODLV", "FDBK", "MATK", "MDEC", "CATK", "CDEC", "MMUL"},
-    /* sub-synth */ {"CUT", "RES", "WAVE", "PW", "FENV", "ATK", "SUS", "REL"},
-    /* fm-drums */  {"FREQ", "MFRQ", "MIDX", "SWEP", "DECY", "NOIS", "CLIK", "FDBK"},
-    /* additive */  {"MODE", "HARM", "RATIO", "SPRD", "ROLL", "CHAR", "SHPE", "REL"},
-    /* phase-dist */{"DIST", "TMBR", "MODE", "COLR", "ATK", "DEC", "SUS", "REL"},
-    /* bird */      {"RATE", "DROP", "CURV", "VDEP", "VRAT", "BUZZ", "SHPE", "GAP"},
+    /* fm-synth */  {"MODIDX", "MODRTO", "CARRTO", "FEEDBK", "ATTACK", "DECAY",  "SUSTN",  "RELEAS"},
+    /* ym2413 */    {"INSTRU", "MODLVL", "FEEDBK", "MODATK", "MODDEC", "CARATK", "CARDEC", "MODMUL"},
+    /* sub-synth */ {"CUTOFF", "RESNCE", "WAVE",   "PWIDTH", "FLTENV", "ATTACK", "SUSTN",  "RELEAS"},
+    /* fm-drums */  {"CRFREQ", "MDFREQ", "MODIDX", "SWEEP",  "DECAY",  "NOISE",  "CLICK",  "FEEDBK"},
+    /* additive */  {"MODE",   "HARMNC", "RATIO",  "SPREAD", "ROLLOF", "CHARAC", "SHAPE",  "RELEAS"},
+    /* phase-dist */{"DISTOR", "TIMBRE", "MODE",   "COLOR",  "ATTACK", "DECAY",  "SUSTN",  "RELEAS"},
+    /* bird */      {"RATE",   "DROP",   "CURVE",  "VBDPTH", "VBRATE", "BUZZ",   "SHAPE",  "GAP"},
 };
 
 static int g_type_idx = 0;
@@ -757,8 +775,7 @@ static void render(void) {
             p += snprintf(out + p, sizeof(out) - (size_t)p, "\n");
         }
 
-        /* knob grid: 20 cols wide, 8 knobs compact */
-        /* "1MOD████████████" = 1+3+12 = 16 chars per row */
+        /* knob grid: "1 MODIDX ###########" = 9 prefix + 30 bar = 39 */
         {
             const char **kn = KNOB_LABELS[g_type_idx];
             for (int ki = 0; ki < 8; ki++) {
@@ -766,7 +783,7 @@ static void render(void) {
                 if (fill < 0) fill = 0;
                 if (fill > 30) fill = 30;
                 p += snprintf(out + p, sizeof(out) - (size_t)p,
-                    "\033[36m%-8s\033[32m", kn[ki]);
+                    "\033[33m%d \033[36m%-7s\033[32m", ki + 1, kn[ki]);
                 for (int b = 0; b < fill; b++)
                     p += snprintf(out + p, sizeof(out) - (size_t)p, "#");
                 p += snprintf(out + p, sizeof(out) - (size_t)p, "\033[0m");
@@ -852,7 +869,7 @@ int main(int argc, char *argv[]) {
     scan_audio_devices();
     scan_midi_devices();
     detect_state();
-    knob_listen_init();
+    /* knob values come from HTTP poll, no MIDI listener needed */
 
     get_cpu_pct();
     update_battery();
@@ -872,7 +889,7 @@ int main(int argc, char *argv[]) {
         }
 
         /* poll knob CCs for bar display */
-        if (knob_poll() && g_mode == MODE_MAIN) dirty = 1;
+        /* knob values updated via HTTP poll below */
 
         if (n > 0) {
             /* Ctrl+C always quits */
@@ -1076,11 +1093,9 @@ int main(int argc, char *argv[]) {
             int new_preset = g_preset;
             char pname[32] = "";
             if (http_poll_rack(&new_type, &new_preset, pname, (int)sizeof(pname)) == 0) {
-                if (new_type != g_type_idx || new_preset != g_preset) {
-                    g_type_idx = new_type;
-                    g_preset = new_preset;
-                    dirty = 1;
-                }
+                g_type_idx = new_type;
+                g_preset = new_preset;
+                dirty = 1;  /* always redraw — knob values may have changed */
             }
         }
 
