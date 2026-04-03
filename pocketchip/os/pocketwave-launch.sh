@@ -69,5 +69,5 @@ fi
 
 # Full mode: launch pocketwave-ui in stterm
 echo "pocketwave: launching UI"
-exec stterm -T pocketwave -f "DejaVu Sans Mono:size=24" \
+exec stterm -T pocketwave -f "Terminus:style=Bold:size=24" \
     -e /usr/local/bin/pocketwave-ui

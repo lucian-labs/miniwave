@@ -707,29 +707,50 @@ static void render(void) {
 
     case MODE_MAIN:
     default:
-        /* header: 1 line — synth P# cpu batt */
+        /* header: 1 line — synth P# ......... cpu batt */
         {
-            const char *bars[] = {"▁","▂","▃","▄","▅","▆","▇","█"};
-            int cl = g_cpu * 7 / 100;
-            if (cl < 0) cl = 0; if (cl > 7) cl = 7;
-            const char *cc = g_cpu > 80 ? "\033[31m" : g_cpu > 50 ? "\033[33m" : "\033[90m";
-
-            p += snprintf(out + p, sizeof(out) - (size_t)p,
-                "\033[36m%s \033[32m%d ",
+            /* synth name + preset */
+            int hlen = snprintf(out + p, sizeof(out) - (size_t)p,
+                "\033[36m%s \033[32m%d\033[0m",
                 SYNTH_LABELS[g_type_idx], g_preset);
+            p += hlen;
+            /* measure visible chars (strip ANSI) */
+            int vis = 0;
+            { const char *s = SYNTH_LABELS[g_type_idx]; vis = (int)strlen(s) + 1; }
+            { char tmp[8]; vis += snprintf(tmp, sizeof(tmp), "%d", g_preset); }
 
-            p += snprintf(out + p, sizeof(out) - (size_t)p,
-                "%s%s\033[0m", cc, bars[cl]);
-
+            /* build right side: cpu + batt */
+            char rside[32];
+            int rlen = 0;
+            /* CPU: yellow block chars */
+            int cfill = g_cpu * 3 / 100;
+            if (cfill < 0) cfill = 0; if (cfill > 3) cfill = 3;
+            rlen += snprintf(rside + rlen, sizeof(rside) - (size_t)rlen, "\033[33m");
+            for (int b = 0; b < cfill; b++)
+                rlen += snprintf(rside + rlen, sizeof(rside) - (size_t)rlen, "#");
+            int rvis = cfill;
+            /* battery */
             if (g_batt_pct >= 0) {
-                int bl = g_batt_pct * 7 / 100;
-                if (bl < 0) bl = 0; if (bl > 7) bl = 7;
+                int bfill = g_batt_pct * 3 / 100;
+                if (bfill < 0) bfill = 0; if (bfill > 3) bfill = 3;
                 const char *bc = g_batt_pct < 20 ? "\033[31m" :
                                  g_batt_pct < 50 ? "\033[33m" : "\033[32m";
-                p += snprintf(out + p, sizeof(out) - (size_t)p,
-                    "%s%s%s\033[0m",
-                    bc, g_batt_charging ? "+" : "", bars[bl]);
+                rlen += snprintf(rside + rlen, sizeof(rside) - (size_t)rlen, "%s", bc);
+                if (g_batt_charging)
+                    rlen += snprintf(rside + rlen, sizeof(rside) - (size_t)rlen, "+");
+                for (int b = 0; b < bfill; b++)
+                    rlen += snprintf(rside + rlen, sizeof(rside) - (size_t)rlen, "#");
+                rvis += bfill + (g_batt_charging ? 1 : 0);
             }
+            rlen += snprintf(rside + rlen, sizeof(rside) - (size_t)rlen, "\033[0m");
+
+            /* pad between left and right */
+            int pad = 20 - vis - rvis;
+            if (pad < 1) pad = 1;
+            for (int s = 0; s < pad; s++)
+                p += snprintf(out + p, sizeof(out) - (size_t)p, " ");
+            p += snprintf(out + p, sizeof(out) - (size_t)p, "%s", rside);
+
             if (g_flash_ticks > 0)
                 p += snprintf(out + p, sizeof(out) - (size_t)p,
                     " \033[1;32m%s\033[0m", g_flash_msg);
@@ -744,11 +765,15 @@ static void render(void) {
                 int fill = g_knob_vals[ki] * 8 / 127;
                 if (fill < 0) fill = 0;
                 if (fill > 8) fill = 8;
-                p += snprintf(out + p, sizeof(out) - (size_t)p,
-                    "\033[36m%-5s\033[32m", kn[ki]);
+                /* bars grow left, label on right */
+                int empty = 8 - fill;
+                p += snprintf(out + p, sizeof(out) - (size_t)p, "\033[32m");
+                for (int b = 0; b < empty; b++)
+                    p += snprintf(out + p, sizeof(out) - (size_t)p, " ");
                 for (int b = 0; b < fill; b++)
                     p += snprintf(out + p, sizeof(out) - (size_t)p, "#");
-                p += snprintf(out + p, sizeof(out) - (size_t)p, "\033[0m");
+                p += snprintf(out + p, sizeof(out) - (size_t)p,
+                    " \033[36m%s\033[0m", kn[ki]);
                 if (ki < 7) p += snprintf(out + p, sizeof(out) - (size_t)p, "\n");
             }
         }
