@@ -68,6 +68,7 @@ typedef struct {
     float   attack, decay, sustain, release;
     float   volume;
     float   cents_mod;
+    float   mod_wheel;     /* 0-1, CC1 — distortion boost */
     PDVoice voices[PD_MAX_VOICES];
 } PhaseDistState;
 
@@ -226,6 +227,9 @@ static void pd_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
         case 19: s->decay = 0.01f * powf(500.0f, cc); break;
         case 20: s->sustain = cc; break;
         case 21: s->release = 0.01f * powf(500.0f, cc); break;
+        case 1: /* mod wheel → distortion boost */
+            s->mod_wheel = cc;
+            break;
         case 120: case 123:
             for (int i = 0; i < PD_MAX_VOICES; i++) s->voices[i].active = 0;
             break;
@@ -255,7 +259,8 @@ static void pd_render(void *state, float *stereo_buf, int frames, int sample_rat
 
             /* Phase distortion synthesis */
             float raw_phase = v->phase; /* 0-1 */
-            float dist_phase = pd_distort_phase(raw_phase, s->mode, s->distortion, s->timbre);
+            float eff_dist = s->distortion + s->mod_wheel * (1.0f - s->distortion);
+            float dist_phase = pd_distort_phase(raw_phase, s->mode, eff_dist, s->timbre);
 
             /* Generate sample from distorted phase */
             float sample = sinf(dist_phase * PD_TAU);

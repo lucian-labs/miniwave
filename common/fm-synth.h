@@ -60,6 +60,7 @@ typedef struct {
     float         volume;        /* internal volume, default 1.0 */
     float         limiter_env;   /* per-instance limiter envelope */
     float         cents_mod;     /* written by slot layer before render */
+    float         mod_wheel;     /* 0-1, from CC1 — scales mod index */
 } FMSynth;
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
@@ -202,14 +203,21 @@ static void fm_synth_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
             s->live_params.mod_index = 30.0f * cc * cc;
             s->live_params.override = 1;
             break;
-        case 15: /* mod ratio — 0.25→16, log */
-            s->live_params.mod_ratio = 0.25f * powf(64.0f, cc);
+        case 15: /* mod ratio — snapped to harmonic ratios */
+        case 16: /* carrier ratio — snapped to harmonic ratios */ {
+            static const float harm[] = {
+                0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f,
+                4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 10.0f, 12.0f
+            };
+            int idx = (int)(cc * 12.99f);
+            if (idx < 0) idx = 0;
+            if (idx > 12) idx = 12;
+            float ratio = harm[idx];
+            if (d1 == 15) s->live_params.mod_ratio = ratio;
+            else          s->live_params.carrier_ratio = ratio;
             s->live_params.override = 1;
             break;
-        case 16: /* carrier ratio — 0.25→8, log */
-            s->live_params.carrier_ratio = 0.25f * powf(32.0f, cc);
-            s->live_params.override = 1;
-            break;
+        }
         case 17: /* feedback — 0→2.5 */
             s->live_params.feedback = cc * 2.5f;
             s->live_params.override = 1;
@@ -229,6 +237,9 @@ static void fm_synth_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
         case 21: /* release — 0.01→5s log */
             s->live_params.release = 0.01f * powf(500.0f, cc);
             s->live_params.override = 1;
+            break;
+        case 1: /* mod wheel → FM mod index scaler */
+            s->mod_wheel = cc;
             break;
         case 120: case 123:
             for (int i = 0; i < FM_MAX_VOICES; i++) s->voices[i].active = 0;
@@ -343,10 +354,13 @@ static void fm_synth_render(void *state, float *stereo_buf, int frames, int samp
                 continue;
             }
 
+            /* Mod wheel scales mod index: 0=silent, 0.5=normal, 1=2x */
+            float mi_eff = mi * (1.0f + s->mod_wheel);
+
             /* 2-op FM synthesis */
             float mod_out = sinf(vc->mp + fb * vc->prev_mod);
             vc->prev_mod = mod_out;
-            float sample = sinf(vc->cp + mi * mod_out) * env * vc->velocity * 0.35f;
+            float sample = sinf(vc->cp + mi_eff * mod_out) * env * vc->velocity * 0.35f;
 
             /* Anti-click fade-in (~1ms ramp on note start) */
             if (vc->sample_count < FM_FADEIN_SAMPLES) {

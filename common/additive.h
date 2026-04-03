@@ -129,6 +129,7 @@ typedef struct {
     /* Output */
     float volume;
     float cents_mod;
+    float mod_wheel;     /* 0-1, CC1 — harmonic spread boost */
 
     /* Voices */
     AddVoice voices[ADD_MAX_VOICES];
@@ -416,6 +417,9 @@ static void additive_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
         }
         case 21: /* release — 0.01→8s log */
             s->release = 0.01f * powf(800.0f, cc);
+            break;
+        case 1: /* mod wheel → harmonic spread boost */
+            s->mod_wheel = cc;
             break;
         case 120: case 123:
             for (int i = 0; i < ADD_MAX_VOICES; i++) s->voices[i].active = 0;

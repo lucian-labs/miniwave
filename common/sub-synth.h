@@ -87,6 +87,7 @@ typedef struct {
     SubSynthParams params;
     float          volume;
     float          cents_mod;     /* written by slot layer before render */
+    float          mod_wheel;     /* 0-1, from CC1 — filter cutoff boost */
 } SubSynth;
 
 /* ── Helpers ──────────────────────────────────────────────────────────── */
@@ -377,6 +378,9 @@ static void sub_synth_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) 
         case 21: /* macro: amp release */
             s->params.amp_release = 0.001f + (float)d2 / 127.0f * 5.0f;
             break;
+        case 1: /* mod wheel → filter cutoff boost */
+            s->mod_wheel = (float)d2 / 127.0f;
+            break;
         case 70: /* waveform */
             s->params.waveform = d2 % SUB_WAVE_COUNT;
             break;
@@ -450,8 +454,10 @@ static void sub_synth_render(void *state, float *stereo_buf, int frames,
                 continue;
             }
 
-            /* Effective filter cutoff: base * 2^(depth * env * 8 octaves) */
+            /* Effective filter cutoff: base * 2^(depth * env * 8 octaves) + mod wheel boost */
             float cutoff = p->filter_cutoff * powf(2.0f, p->filter_env_depth * fenv * 8.0f);
+            if (s->mod_wheel > 0.001f)
+                cutoff *= (1.0f + s->mod_wheel * 4.0f); /* up to 5x boost */
 
             /* Oscillator (apply keyseq cents detune) */
             float base_freq = v->freq;

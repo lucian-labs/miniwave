@@ -933,6 +933,7 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
             else if (strcmp(itype->name, "fm-drums") == 0) ((FMDrumState *)st)->cents_mod = cm;
             else if (strcmp(itype->name, "additive") == 0) ((AdditiveState *)st)->cents_mod = cm;
             else if (strcmp(itype->name, "phase-dist") == 0) ((PhaseDistState *)st)->cents_mod = cm;
+            else if (strcmp(itype->name, "bird") == 0) ((BirdState *)st)->cents_mod = cm;
         }
         slot->cents_mod = 0; /* reset for next frame */
 

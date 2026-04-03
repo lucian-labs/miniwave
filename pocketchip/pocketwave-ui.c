@@ -222,6 +222,65 @@ static int http_poll_rack(int *out_type_idx, int *out_preset, char *out_preset_n
     return 0;
 }
 
+static int g_knob_vals[8] = {0}; /* 0-127, last seen CC values */
+
+/* ── Knob CC listener — passive ALSA seq tap for CC 24-31 ─────────── */
+
+static snd_seq_t *g_knob_seq = NULL;
+
+static void knob_listen_init(void) {
+    if (snd_seq_open(&g_knob_seq, "default", SND_SEQ_OPEN_INPUT, SND_SEQ_NONBLOCK) < 0) {
+        g_knob_seq = NULL;
+        return;
+    }
+    snd_seq_set_client_name(g_knob_seq, "pw-knobs");
+    int port = snd_seq_create_simple_port(g_knob_seq, "in",
+        SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE,
+        SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
+    if (port < 0) { snd_seq_close(g_knob_seq); g_knob_seq = NULL; return; }
+
+    /* Subscribe to all readable ports (same as miniwave does) */
+    snd_seq_client_info_t *cinfo;
+    snd_seq_port_info_t *pinfo;
+    snd_seq_client_info_alloca(&cinfo);
+    snd_seq_port_info_alloca(&pinfo);
+    int me = snd_seq_client_id(g_knob_seq);
+    snd_seq_client_info_set_client(cinfo, -1);
+    while (snd_seq_query_next_client(g_knob_seq, cinfo) >= 0) {
+        int c = snd_seq_client_info_get_client(cinfo);
+        if (c == me || c == 0) continue;
+        const char *cn = snd_seq_client_info_get_name(cinfo);
+        if (cn && strstr(cn, "Midi Through")) continue;
+        snd_seq_port_info_set_client(pinfo, c);
+        snd_seq_port_info_set_port(pinfo, -1);
+        while (snd_seq_query_next_port(g_knob_seq, pinfo) >= 0) {
+            unsigned int caps = snd_seq_port_info_get_capability(pinfo);
+            if (!(caps & SND_SEQ_PORT_CAP_READ)) continue;
+            if (!(caps & SND_SEQ_PORT_CAP_SUBS_READ)) continue;
+            snd_seq_connect_from(g_knob_seq, port, c,
+                                 snd_seq_port_info_get_port(pinfo));
+        }
+    }
+}
+
+static int knob_poll(void) {
+    if (!g_knob_seq) return 0;
+    int dirty = 0;
+    snd_seq_event_t *ev = NULL;
+    while (snd_seq_event_input(g_knob_seq, &ev) >= 0 && ev) {
+        if (ev->type == SND_SEQ_EVENT_CONTROLLER) {
+            int cc = ev->data.control.param;
+            int val = ev->data.control.value;
+            /* CC 24-31 = MPK knobs */
+            if (cc >= 24 && cc <= 31) {
+                g_knob_vals[cc - 24] = val;
+                dirty = 1;
+            }
+        }
+    }
+    return dirty;
+}
+
 /* ── UI modes ──────────────────────────────────────────────────────── */
 
 enum {
@@ -648,45 +707,51 @@ static void render(void) {
 
     case MODE_MAIN:
     default:
-        /* header */
-        p += snprintf(out + p, sizeof(out) - (size_t)p,
-            "\033[1;36m POCKETWAVE\033[0m"
-            "\033[90m %d%%\033[0m",
-            g_cpu);
-        if (g_flash_ticks > 0)
+        /* header: 1 line — synth P# cpu batt */
+        {
+            const char *bars[] = {"▁","▂","▃","▄","▅","▆","▇","█"};
+            int cl = g_cpu * 7 / 100;
+            if (cl < 0) cl = 0; if (cl > 7) cl = 7;
+            const char *cc = g_cpu > 80 ? "\033[31m" : g_cpu > 50 ? "\033[33m" : "\033[90m";
+
             p += snprintf(out + p, sizeof(out) - (size_t)p,
-                " \033[1;32m%s\033[0m", g_flash_msg);
-        p += snprintf(out + p, sizeof(out) - (size_t)p, "\n");
+                "\033[36m%s \033[32m%d ",
+                SYNTH_LABELS[g_type_idx], g_preset);
 
-        /* selected synth + mode flags */
-        p += snprintf(out + p, sizeof(out) - (size_t)p,
-            " \033[1;37m%s\033[0m",
-            SYNTH_LABELS[g_type_idx]);
-        if (g_legato)
-            p += snprintf(out + p, sizeof(out) - (size_t)p, " \033[33mLEG\033[0m");
-        else if (g_mono)
-            p += snprintf(out + p, sizeof(out) - (size_t)p, " \033[33mMON\033[0m");
-        p += snprintf(out + p, sizeof(out) - (size_t)p, "\n\n");
+            p += snprintf(out + p, sizeof(out) - (size_t)p,
+                "%s%s\033[0m", cc, bars[cl]);
 
-        /* preset */
-        p += snprintf(out + p, sizeof(out) - (size_t)p,
-            " \033[33mP\033[0m %d\n",
-            g_preset);
-
-        /* knob labels — two rows of 4 */
-        const char **kn = KNOB_LABELS[g_type_idx];
-        p += snprintf(out + p, sizeof(out) - (size_t)p,
-            "\033[90m");
-        for (int r = 0; r < 2; r++) {
-            p += snprintf(out + p, sizeof(out) - (size_t)p, " ");
-            for (int k = 0; k < 4; k++) {
-                int ki = r * 4 + k;
+            if (g_batt_pct >= 0) {
+                int bl = g_batt_pct * 7 / 100;
+                if (bl < 0) bl = 0; if (bl > 7) bl = 7;
+                const char *bc = g_batt_pct < 20 ? "\033[31m" :
+                                 g_batt_pct < 50 ? "\033[33m" : "\033[32m";
                 p += snprintf(out + p, sizeof(out) - (size_t)p,
-                    "%-5s", kn[ki]);
+                    "%s%s%s\033[0m",
+                    bc, g_batt_charging ? "+" : "", bars[bl]);
             }
+            if (g_flash_ticks > 0)
+                p += snprintf(out + p, sizeof(out) - (size_t)p,
+                    " \033[1;32m%s\033[0m", g_flash_msg);
             p += snprintf(out + p, sizeof(out) - (size_t)p, "\n");
         }
-        p += snprintf(out + p, sizeof(out) - (size_t)p, "\033[0m");
+
+        /* knob grid: 20 cols wide, 8 knobs compact */
+        /* "1MOD████████████" = 1+3+12 = 16 chars per row */
+        {
+            const char **kn = KNOB_LABELS[g_type_idx];
+            for (int ki = 0; ki < 8; ki++) {
+                int fill = g_knob_vals[ki] * 8 / 127;
+                if (fill < 0) fill = 0;
+                if (fill > 8) fill = 8;
+                p += snprintf(out + p, sizeof(out) - (size_t)p,
+                    "\033[36m%-5s\033[32m", kn[ki]);
+                for (int b = 0; b < fill; b++)
+                    p += snprintf(out + p, sizeof(out) - (size_t)p, "#");
+                p += snprintf(out + p, sizeof(out) - (size_t)p, "\033[0m");
+                if (ki < 7) p += snprintf(out + p, sizeof(out) - (size_t)p, "\n");
+            }
+        }
         break;
     }
 
@@ -766,6 +831,7 @@ int main(int argc, char *argv[]) {
     scan_audio_devices();
     scan_midi_devices();
     detect_state();
+    knob_listen_init();
 
     get_cpu_pct();
     update_battery();
@@ -783,6 +849,9 @@ int main(int argc, char *argv[]) {
         if (g_mode == MODE_MIDI_MON) {
             if (midi_mon_poll()) dirty = 1;
         }
+
+        /* poll knob CCs for bar display */
+        if (knob_poll() && g_mode == MODE_MAIN) dirty = 1;
 
         if (n > 0) {
             /* Ctrl+C always quits */

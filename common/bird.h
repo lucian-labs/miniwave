@@ -63,6 +63,9 @@ typedef struct {
     /* timbre */
     float     buzz;        /* harmonic content 0=pure sine, 1=raspy */
     float     chirp_shape; /* amp envelope: 0=percussive, 1=smooth swell */
+
+    float     cents_mod;
+    float     mod_wheel;   /* 0-1, CC1 — vibrato depth boost */
 } BirdState;
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
@@ -142,6 +145,9 @@ static void bird_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
         case 21: /* gap — pause between chirps */
             s->gap_dur = cc * 2.0f; /* 0 → 2 seconds */
             break;
+        case 1: /* mod wheel → vibrato depth boost */
+            s->mod_wheel = cc;
+            break;
         case 120: case 123:
             for (int i = 0; i < BIRD_MAX_VOICES; i++)
                 s->voices[i].active = 0;
@@ -181,9 +187,10 @@ static void bird_render(void *state, float *buf, int frames, int sample_rate) {
                 float sweep_mult = powf(2.0f, -s->drop_semi * curve_t / 12.0f);
                 float freq = v->root_freq * sweep_mult;
 
-                /* vibrato */
-                if (s->vib_depth > 0.001f) {
-                    float vib = sinf(v->vib_phase) * s->vib_depth;
+                /* vibrato (boosted by mod wheel) */
+                float vd = s->vib_depth + s->mod_wheel * 6.0f;
+                if (vd > 0.001f) {
+                    float vib = sinf(v->vib_phase) * vd;
                     freq *= powf(2.0f, vib / 12.0f);
                     v->vib_phase += BIRD_TAU * s->vib_rate * dt;
                     if (v->vib_phase >= BIRD_TAU) v->vib_phase -= BIRD_TAU;
