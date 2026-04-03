@@ -294,9 +294,12 @@ static int bird_json_load(void *state, const char *json) {
     BirdState *s = (BirdState *)state;
     const char *p;
     if ((p = strstr(json, "\"volume\":")) != NULL)      s->volume = (float)atof(p + 9);
-    if ((p = strstr(json, "\"drop\":")) != NULL)        s->drop_semi = (float)atof(p + 7);
-    if ((p = strstr(json, "\"chirp\":")) != NULL)       s->chirp_dur = (float)atof(p + 8);
-    if ((p = strstr(json, "\"gap\":")) != NULL)         s->gap_dur = (float)atof(p + 6);
+    if ((p = strstr(json, "\"drop_semi\":")) != NULL)   s->drop_semi = (float)atof(p + 12);
+    else if ((p = strstr(json, "\"drop\":")) != NULL)   s->drop_semi = (float)atof(p + 7);
+    if ((p = strstr(json, "\"chirp_dur\":")) != NULL)   s->chirp_dur = (float)atof(p + 12);
+    else if ((p = strstr(json, "\"chirp\":")) != NULL)  s->chirp_dur = (float)atof(p + 8);
+    if ((p = strstr(json, "\"gap_dur\":")) != NULL)     s->gap_dur = (float)atof(p + 10);
+    else if ((p = strstr(json, "\"gap\":")) != NULL)    s->gap_dur = (float)atof(p + 6);
     if ((p = strstr(json, "\"curve\":")) != NULL)       s->curve = (float)atof(p + 8);
     if ((p = strstr(json, "\"vib_depth\":")) != NULL)   s->vib_depth = (float)atof(p + 12);
     if ((p = strstr(json, "\"vib_rate\":")) != NULL)    s->vib_rate = (float)atof(p + 11);
