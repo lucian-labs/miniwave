@@ -602,6 +602,9 @@ int main(int argc, char *argv[]) {
 
         snd_pcm_hw_params_get_period_size(hw, &ps, NULL);
         period_size = (int)ps;
+        g_period_size = period_size;
+        g_actual_srate = (int)rate;
+        snprintf(g_audio_device, sizeof(g_audio_device), "%s", audio_dev);
         fprintf(stderr, "[miniwave] audio: ALSA %s @ %uHz period=%d\n",
                 audio_dev, rate, period_size);
     }

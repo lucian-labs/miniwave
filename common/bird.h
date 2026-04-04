@@ -282,11 +282,14 @@ static int bird_json_status(void *state, char *buf, int max) {
     BirdState *s = (BirdState *)state;
     return snprintf(buf, (size_t)max,
         "\"instrument_type\":\"bird\","
-        "\"volume\":%.3f,\"drop_semi\":%.1f,\"chirp_dur\":%.3f,"
+        "\"volume\":%.3f,"
+        "\"params\":{"
+        "\"drop_semi\":%.1f,\"chirp_dur\":%.3f,"
         "\"gap_dur\":%.3f,\"curve\":%.1f,"
         "\"vib_depth\":%.2f,\"vib_rate\":%.1f,"
-        "\"buzz\":%.2f,\"chirp_shape\":%.2f",
-        (double)s->volume, (double)s->drop_semi,
+        "\"buzz\":%.2f,\"chirp_shape\":%.2f}",
+        (double)s->volume,
+        (double)s->drop_semi,
         (double)s->chirp_dur, (double)s->gap_dur,
         (double)s->curve, (double)s->vib_depth,
         (double)s->vib_rate, (double)s->buzz,

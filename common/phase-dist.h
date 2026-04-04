@@ -341,12 +341,15 @@ static int pd_json_status(void *state, char *buf, int max) {
     for (int i = 0; i < PD_MAX_VOICES; i++) if (s->voices[i].active) active++;
     return snprintf(buf, (size_t)max,
         "\"instrument_type\":\"phase-dist\","
-        "\"mode\":\"%s\",\"mode_index\":%d,\"active_voices\":%d,"
+        "\"mode\":\"%s\",\"mode_index\":%d,"
+        "\"params\":{"
         "\"distortion\":%.4f,\"timbre\":%.4f,\"color\":%.4f,"
-        "\"attack\":%.4f,\"decay\":%.4f,\"sustain\":%.4f,\"release\":%.4f",
-        modes[s->mode], s->mode, active,
+        "\"attack\":%.4f,\"decay\":%.4f,\"sustain\":%.4f,\"release\":%.4f},"
+        "\"active_voices\":%d",
+        modes[s->mode], s->mode,
         (double)s->distortion, (double)s->timbre, (double)s->color,
-        (double)s->attack, (double)s->decay, (double)s->sustain, (double)s->release);
+        (double)s->attack, (double)s->decay, (double)s->sustain, (double)s->release,
+        active);
 }
 
 static int pd_json_save(void *state, char *buf, int max) {

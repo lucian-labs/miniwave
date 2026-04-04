@@ -98,6 +98,17 @@ typedef struct {
     float            glide_pos;     /* 0→1 progress */
     float            glide_rate;    /* glide speed (1/seconds) */
     int              last_note;     /* last played note (-1 = none) */
+
+    /* User presets — per-slot param snapshots */
+    #define MAX_USER_PRESETS 64
+    #define MAX_PRESET_NAME  32
+    #define MAX_PRESET_JSON  2048
+    struct {
+        char name[MAX_PRESET_NAME];
+        char json[MAX_PRESET_JSON];
+    } user_presets[MAX_USER_PRESETS];
+    int              num_user_presets;
+    int              current_user_preset;  /* -1 = none */
 } RackSlot;
 
 /* The rack */

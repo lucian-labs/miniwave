@@ -348,7 +348,8 @@ static int ym2413_json_status(void *state, char *buf, int max) {
     return snprintf(buf, (size_t)max,
         "\"instrument_type\":\"ym2413\","
         "\"preset_index\":%d,\"preset_name\":\"%s\","
-        "\"rhythm_mode\":%d,\"active_voices\":%d,\"volume\":%.4f,"
+        "\"rhythm_mode\":%d,\"volume\":%.4f,"
+        "\"params\":{"
         "\"feedback\":%d,"
         "\"mod_mult\":%d,\"mod_am\":%d,\"mod_vibrato\":%d,"
         "\"mod_eg\":%d,\"mod_ksr\":%d,\"mod_tl\":%d,\"mod_ksl\":%d,"
@@ -357,8 +358,9 @@ static int ym2413_json_status(void *state, char *buf, int max) {
         "\"car_mult\":%d,\"car_am\":%d,\"car_vibrato\":%d,"
         "\"car_eg\":%d,\"car_ksr\":%d,\"car_ksl\":%d,"
         "\"car_wave\":%d,\"car_attack\":%d,\"car_decay\":%d,"
-        "\"car_sustain\":%d,\"car_release\":%d",
-        s->current_instrument, iname, s->rhythm_mode, active, (double)s->volume,
+        "\"car_sustain\":%d,\"car_release\":%d},"
+        "\"active_voices\":%d",
+        s->current_instrument, iname, s->rhythm_mode, (double)s->volume,
         r[0x03] & 0x07,
         r[0x00] & 0x0F, (r[0x00] >> 7) & 1, (r[0x00] >> 6) & 1,
         (r[0x00] >> 5) & 1, (r[0x00] >> 4) & 1, r[0x02] & 0x3F, (r[0x02] >> 6) & 3,
@@ -367,7 +369,8 @@ static int ym2413_json_status(void *state, char *buf, int max) {
         r[0x01] & 0x0F, (r[0x01] >> 7) & 1, (r[0x01] >> 6) & 1,
         (r[0x01] >> 5) & 1, (r[0x01] >> 4) & 1, (r[0x03] >> 6) & 3,
         (r[0x03] >> 4) & 1, (r[0x05] >> 4) & 0x0F, r[0x05] & 0x0F,
-        (r[0x07] >> 4) & 0x0F, r[0x07] & 0x0F);
+        (r[0x07] >> 4) & 0x0F, r[0x07] & 0x0F,
+        active);
 }
 
 /* ── json_save / json_load ────────────────────────────────────────────── */

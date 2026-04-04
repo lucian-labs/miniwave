@@ -305,50 +305,69 @@ static inline void seq_dispatch(snd_seq_event_t *ev) {
     if (!slot->active || !slot->state) return;
     InstrumentType *itype = g_type_registry[slot->type_idx];
 
+    uint8_t raw_status = 0, raw_d1 = 0, raw_d2 = 0;
+
     switch (ev->type) {
     case SND_SEQ_EVENT_NOTEON:
-        itype->midi(slot->state,
-                    (uint8_t)(0x90 | ch),
-                    (uint8_t)ev->data.note.note,
-                    (uint8_t)ev->data.note.velocity);
+        raw_status = (uint8_t)(0x90 | ch);
+        raw_d1 = (uint8_t)ev->data.note.note;
+        raw_d2 = (uint8_t)ev->data.note.velocity;
+        itype->midi(slot->state, raw_status, raw_d1, raw_d2);
         break;
     case SND_SEQ_EVENT_NOTEOFF:
-        itype->midi(slot->state,
-                    (uint8_t)(0x80 | ch),
-                    (uint8_t)ev->data.note.note,
-                    0);
+        raw_status = (uint8_t)(0x80 | ch);
+        raw_d1 = (uint8_t)ev->data.note.note;
+        itype->midi(slot->state, raw_status, raw_d1, 0);
         break;
     case SND_SEQ_EVENT_CONTROLLER:
-        itype->midi(slot->state,
-                    (uint8_t)(0xB0 | ch),
-                    (uint8_t)ev->data.control.param,
-                    (uint8_t)ev->data.control.value);
+        raw_status = (uint8_t)(0xB0 | ch);
+        raw_d1 = (uint8_t)ev->data.control.param;
+        raw_d2 = (uint8_t)ev->data.control.value;
+        /* CC80/81 = user preset down/up */
+        if (raw_d1 == 80 && raw_d2 == 127) {
+            slot_preset_prev(slot, itype);
+            state_mark_dirty();
+            sse_mark_dirty();
+            break;
+        }
+        if (raw_d1 == 81 && raw_d2 == 127) {
+            slot_preset_next(slot, itype);
+            state_mark_dirty();
+            sse_mark_dirty();
+            break;
+        }
+        itype->midi(slot->state, raw_status, raw_d1, raw_d2);
+        state_mark_dirty();
         break;
     case SND_SEQ_EVENT_PGMCHANGE:
-        itype->midi(slot->state,
-                    (uint8_t)(0xC0 | ch),
-                    (uint8_t)ev->data.control.value,
-                    0);
+        raw_status = (uint8_t)(0xC0 | ch);
+        raw_d1 = (uint8_t)ev->data.control.value;
+        itype->midi(slot->state, raw_status, raw_d1, 0);
+        state_mark_dirty();
         break;
     case SND_SEQ_EVENT_PITCHBEND: {
         int val = ev->data.control.value + 8192;
         if (val < 0) val = 0;
         if (val > 16383) val = 16383;
         slot->pitch_bend = (float)(val - 8192) / 8192.0f;
-        itype->midi(slot->state,
-                    (uint8_t)(0xE0 | ch),
-                    (uint8_t)(val & 0x7F),
-                    (uint8_t)((val >> 7) & 0x7F));
+        raw_status = (uint8_t)(0xE0 | ch);
+        raw_d1 = (uint8_t)(val & 0x7F);
+        raw_d2 = (uint8_t)((val >> 7) & 0x7F);
+        itype->midi(slot->state, raw_status, raw_d1, raw_d2);
         break;
     }
     case SND_SEQ_EVENT_CHANPRESS:
-        itype->midi(slot->state,
-                    (uint8_t)(0xD0 | ch),
-                    (uint8_t)ev->data.control.value,
-                    0);
+        raw_status = (uint8_t)(0xD0 | ch);
+        raw_d1 = (uint8_t)ev->data.control.value;
+        itype->midi(slot->state, raw_status, raw_d1, 0);
         break;
     default:
         break;
+    }
+
+    if (raw_status) {
+        midi_ring_push(raw_status, raw_d1, raw_d2);
+        atomic_store(&g_sse_detail_dirty, 1);
     }
 }
 
@@ -562,6 +581,9 @@ int main(int argc, char *argv[]) {
 
     snd_pcm_hw_params_get_period_size(hw, &ps, NULL);
     period_size = (int)ps;
+    g_period_size = period_size;
+    g_actual_srate = (int)rate;
+    snprintf(g_audio_device, sizeof(g_audio_device), "%s", audio_dev);
     fprintf(stderr, "[miniwave] audio: ALSA %s @ %uHz period=%d\n",
             audio_dev, rate, period_size);
 
@@ -645,8 +667,16 @@ int main(int argc, char *argv[]) {
 
     /* ── Audio render loop ─────────────────────────────────────── */
 
+    const float period_us = (float)period_size / (float)SAMPLE_RATE * 1e6f;
+
     while (!g_quit) {
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
         render_mix(mix_buf, slot_buf, period_size, SAMPLE_RATE);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        float render_us = (float)(t1.tv_sec - t0.tv_sec) * 1e6f +
+                          (float)(t1.tv_nsec - t0.tv_nsec) / 1e3f;
+        g_cpu_load = g_cpu_load * 0.95f + (render_us / period_us) * 0.05f;
 
         if (g_rack.local_mute) {
             memset(audio_buf, 0, (size_t)(period_size * CHANNELS) * sizeof(int16_t));

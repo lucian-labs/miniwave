@@ -144,20 +144,36 @@ html, body {
 
 #main {
   display: flex;
+  flex-direction: column;
   height: calc(100% - 48px - 38px); /* topbar + footer */
   position: relative;
+}
+
+#main-upper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+#keyboard-bar {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 4px 8px;
+  flex-shrink: 0;
 }
 
 /* ── Rack Grid ───────────────────────────────────────────────────── */
 
 #rack {
-  flex: 1;
+  width: 200px;
+  flex-shrink: 0;
   overflow-y: auto;
   padding: 8px;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
 }
 
 .ch-strip {
@@ -283,13 +299,11 @@ html, body {
 /* ── Detail Pane ─────────────────────────────────────────────────── */
 
 #detail {
-  width: 420px;
+  flex: 1;
   background: var(--panel);
-  border-left: 1px solid var(--border);
   display: none;
   flex-direction: column;
   overflow-y: auto;
-  flex-shrink: 0;
 }
 
 #detail.open { display: flex; }
@@ -362,6 +376,9 @@ html, body {
 .detail-type-select option { background: var(--panel); color: var(--text); }
 
 .detail-body { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.detail-columns { display: flex; gap: 16px; flex: 1; }
+.detail-col-left { flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+.detail-col-right { flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
 
 /* Preset Browser */
 .preset-section { display: flex; flex-direction: column; gap: 8px; }
@@ -637,36 +654,30 @@ html, body {
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 
-@media (max-width: 1024px) {
-  #rack { grid-template-columns: repeat(2, 1fr); }
-  #detail { width: 360px; }
-}
-
 @media (max-width: 768px) {
-  #rack { grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; }
-  #detail {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 100%;
-    z-index: 50;
-    background: var(--panel);
-  }
+  #rack { width: 160px; }
   .midi-section { display: none; }
   #master-vol { width: 60px; }
 }
 
 @media (max-width: 480px) {
-  #rack { grid-template-columns: 1fr; }
-  .ch-strip { min-height: 100px; }
+  #main { flex-direction: column-reverse; }
+  #rack {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    max-height: 120px;
+  }
+  .ch-strip { min-width: 70px; flex: 1; }
 }
 </style>
 </head>
 <body>
 
 <div id="topbar">
-  <div class="logo">miniwave / <a href="/keyseq-test" style="color:#8866cc;text-decoration:none">keyseq</a> / <a href="/effex" style="color:#00d4aa;text-decoration:none">effex</a></div>
+  <div class="logo">miniwave / <a href="/keyseq-test" style="color:#8866cc;text-decoration:none">keyseq</a> / <a href="/effex" style="color:#00d4aa;text-decoration:none">effex</a> / <a href="javascript:void(0)" id="mon-toggle" style="color:#ff8800;text-decoration:none">mon</a></div>
   <div class="master-section">
     <label>Master</label>
     <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.75">
@@ -680,8 +691,22 @@ html, body {
 </div>
 
 <div id="main">
-  <div id="rack"></div>
-  <div id="detail"></div>
+  <div id="main-upper">
+    <div id="detail"></div>
+    <div id="rack"></div>
+  </div>
+  <div id="keyboard-bar">
+    <div class="note-display" id="note-display">&nbsp;</div>
+    <div class="keyboard" id="keyboard"></div>
+  </div>
+</div>
+
+<div id="midi-monitor" style="display:none;position:absolute;top:48px;left:0;right:0;bottom:38px;background:var(--bg);z-index:100;overflow-y:auto;padding:12px;font-family:monospace;font-size:12px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span style="color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px;">MIDI Monitor</span>
+    <button onclick="document.getElementById('midi-log').innerHTML=''" style="background:var(--card);color:var(--text);border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Clear</button>
+  </div>
+  <div id="midi-log" style="color:#0f0;"></div>
 </div>
 
 <div id="status-footer">
@@ -701,6 +726,7 @@ html, body {
       <span class="footer-label">Bus</span>
       <span class="footer-val" id="f-bus-val">—</span>
     </div>
+    <span class="footer-val" style="margin-left:auto;color:var(--dim);" id="f-version">ui:0.3.1</span>
   </div>
   <div class="footer-row">
     <div class="footer-item">
@@ -824,6 +850,10 @@ function connect() {
   evtSource.addEventListener('ch_status', (e) => {
     try { handleMessage(JSON.parse(e.data)); } catch (err) {}
   });
+
+  evtSource.addEventListener('midi_events', (e) => {
+    try { handleMessage(JSON.parse(e.data)); } catch (err) {}
+  });
 }
 
 function send(msg) {
@@ -851,6 +881,11 @@ function handleMessage(data) {
       rackState.bus_active = data.bus_active;
       rackState.bus_slot = data.bus_slot;
       rackState.sse_clients = data.sse_clients;
+      rackState.period_size = data.period_size;
+      rackState.sample_rate = data.sample_rate;
+      rackState.audio_device = data.audio_device;
+      rackState.cpu_load = data.cpu_load;
+      rackState.version = data.version;
       updateRack();
       updateTopBar();
       /* Re-render detail pane if instrument type changed */
@@ -876,6 +911,19 @@ function handleMessage(data) {
         channelStates[activeDetail] = data;
         updateDetail();
         updateSeqDisplay(data);
+      }
+      break;
+    case 'midi_events':
+      if (data.events) {
+        for (const ev of data.events) {
+          const [status, d1, d2] = ev;
+          const type = status & 0xF0;
+          /* Track held notes for keyboard highlight */
+          if (type === 0x90 && d2 > 0) pressedKeys.add(d1);
+          else if (type === 0x80 || (type === 0x90 && d2 === 0)) pressedKeys.delete(d1);
+        }
+        updateKeyHighlights();
+        updateMidiMonitor(data.events);
       }
       break;
   }
@@ -1088,7 +1136,15 @@ function updateFooter() {
   const audioVal = document.getElementById('f-audio-val');
   if (audioDot && audioVal) {
     audioDot.className = 'footer-dot on';
-    audioVal.textContent = r.audio_backend || '—';
+    let audioText = r.audio_backend || '—';
+    if (r.audio_device) audioText += ' ' + r.audio_device;
+    if (r.period_size) audioText += ' buf=' + r.period_size;
+    if (r.sample_rate) audioText += ' ' + (r.sample_rate/1000) + 'kHz';
+    if (r.cpu_load !== undefined) audioText += ' cpu=' + (r.cpu_load * 100).toFixed(1) + '%';
+    audioVal.textContent = audioText;
+
+  const verEl = document.getElementById('f-version');
+  if (verEl && r.version) verEl.textContent = 'engine:' + r.version + ' ui:0.3.1';
   }
 
   // MIDI
@@ -1199,7 +1255,10 @@ function openDetail(ch) {
     const detail = document.getElementById('detail');
     detail.classList.add('open');
     renderDetailPane();
+    renderKeyboard(ch);
     updateRack();
+    /* Update URL without reload */
+    history.replaceState(null, '', '?ch=' + ch);
   });
 }
 
@@ -1558,8 +1617,8 @@ async function renderGenericInstrument(ch, instrumentType) {
     }
   });
 
-  /* Build HTML */
-  let html = '';
+  /* Build HTML — two column layout: params left, envelopes right */
+  let html = '<div class="detail-columns"><div class="detail-col-left">';
   const groupNames = Object.keys(groups);
   if (ungrouped.length) {
     html += `<div class="params-section"><h3>Parameters <a href="javascript:void(0)" id="json-link" style="color:var(--dim);font-size:9px;font-weight:normal;margin-left:auto;text-decoration:none">json</a></h3><div class="params-grid" id="gp-ungrouped"></div></div>`;
@@ -1567,11 +1626,12 @@ async function renderGenericInstrument(ch, instrumentType) {
   groupNames.forEach(g => {
     html += `<div class="params-section"><h3>${g}</h3><div class="params-grid" id="gp-${g}"></div></div>`;
   });
+  html += `<div class="detail-volume"><label>Vol</label><input type="range" id="detail-vol" min="0" max="1" step="0.01" value="${spec.volume !== undefined ? spec.volume : 1}"><span class="val" id="detail-vol-val">${(spec.volume !== undefined ? spec.volume : 1).toFixed(2)}</span></div>`;
+  html += '</div><div class="detail-col-right">';
   envelopes.forEach((env, i) => {
     html += `<div class="params-section"><h3>${env.name} envelope</h3><canvas class="adsr-canvas" id="adsr-${i}" width="380" height="120"></canvas><div class="adsr-values" id="adsr-vals-${i}"><span></span><span></span><span></span><span></span></div></div>`;
   });
-  html += `<div class="keyboard-section"><h3>Keyboard</h3><div class="note-display" id="note-display">&nbsp;</div><div class="keyboard" id="keyboard"></div></div>`;
-  html += `<div class="detail-volume"><label>Vol</label><input type="range" id="detail-vol" min="0" max="1" step="0.01" value="${spec.volume !== undefined ? spec.volume : 1}"><span class="val" id="detail-vol-val">${(spec.volume !== undefined ? spec.volume : 1).toFixed(2)}</span></div>`;
+  html += '</div></div>';
   body.innerHTML = html;
 
   /* JSON inspection link */
@@ -1882,9 +1942,9 @@ function renderKeyboard(ch) {
   if (!kb) return;
   kb.innerHTML = '';
 
-  // C3 (48) to B4 (71) = 24 keys
-  const startNote = 48;
-  const endNote = 72;
+  // A0 (21) to C8 (108) = 88 keys (full piano)
+  const startNote = 21;
+  const endNote = 109;
 
   // White keys
   const whiteNotes = [];
@@ -2077,11 +2137,48 @@ document.querySelector('#topbar .logo').addEventListener('click', () => {
   if (activeDetail >= 0) closeDetail();
 });
 
+// ── MIDI Monitor ────────────────────────────────────────────────
+
+const MIDI_TYPE_NAMES = {0x80:'NoteOff',0x90:'NoteOn',0xA0:'AfterT',0xB0:'CC',0xC0:'PgmChg',0xD0:'ChanPr',0xE0:'PBend'};
+
+function updateMidiMonitor(events) {
+  const log = document.getElementById('midi-log');
+  if (!log || document.getElementById('midi-monitor').style.display === 'none') return;
+  for (const [status, d1, d2] of events) {
+    const type = status & 0xF0;
+    const ch = status & 0x0F;
+    const name = MIDI_TYPE_NAMES[type] || ('0x' + type.toString(16));
+    const line = document.createElement('div');
+    line.textContent = `ch${ch} ${name.padEnd(8)} ${String(d1).padStart(3)} ${String(d2).padStart(3)}`;
+    if (type === 0x90 && d2 > 0) line.style.color = '#0f0';
+    else if (type === 0x80 || (type === 0x90 && d2 === 0)) line.style.color = '#666';
+    else if (type === 0xB0) line.style.color = '#ff8800';
+    else if (type === 0xE0) line.style.color = '#8866cc';
+    log.insertBefore(line, log.firstChild);
+    if (log.children.length > 200) log.removeChild(log.lastChild);
+  }
+}
+
+document.getElementById('mon-toggle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const mon = document.getElementById('midi-monitor');
+  mon.style.display = mon.style.display === 'none' ? 'block' : 'none';
+});
+
 // ── Init ─────────────────────────────────────────────────────────
+
+/* Open channel from ?ch= URL param */
+const urlCh = new URLSearchParams(location.search).get('ch');
 
 renderRack();
 connect();
-fetchSpec(0);
+if (urlCh !== null) {
+  const ch = parseInt(urlCh);
+  if (ch >= 0 && ch < 16) setTimeout(() => openDetail(ch), 500);
+} else {
+  fetchSpec(0);
+}
+renderKeyboard(0);
 
 </script>
 </body>

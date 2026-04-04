@@ -8,6 +8,8 @@
 #ifndef MINIWAVE_RACK_H
 #define MINIWAVE_RACK_H
 
+#define MINIWAVE_VERSION "0.3.1"
+
 #include <errno.h>
 #include <math.h>
 #include <signal.h>
@@ -89,6 +91,10 @@ static void sighandler(int sig) {
 /* ── Audio backend flag (set at startup) ────────────────────────────── */
 
 static int g_use_jack = 0; /* 1 = JACK active, 0 = native fallback */
+static int g_period_size = 256; /* audio buffer period size */
+static int g_actual_srate = 48000; /* actual sample rate from audio device */
+static char g_audio_device[128] = ""; /* audio device name e.g. "hw:0,0" */
+static float g_cpu_load = 0.0f; /* audio thread CPU usage 0.0-1.0 */
 static int g_bus_active = 0;    /* 1 = shared memory bus connected */
 static int g_bus_slot = -1;     /* which bus slot we claimed */
 static int g_mcast_active = 0;  /* 1 = multicast broadcasting */
@@ -612,6 +618,20 @@ static void state_mark_dirty(void) { g_state_dirty = 1; sse_mark_dirty(); }
 static _Atomic int g_sse_rack_dirty = 1;    /* 1 = broadcast rack_status on next check */
 static _Atomic int g_sse_detail_dirty = 1;  /* 1 = broadcast ch_status on next check */
 
+/* MIDI event ring buffer for SSE monitor */
+#define MIDI_RING_SIZE 64
+typedef struct { uint8_t status, d1, d2; } MidiEvent;
+static MidiEvent g_midi_ring[MIDI_RING_SIZE];
+static _Atomic int g_midi_ring_head = 0;
+static _Atomic int g_midi_ring_tail = 0;
+
+static void midi_ring_push(uint8_t status, uint8_t d1, uint8_t d2) {
+    int head = atomic_load(&g_midi_ring_head);
+    int next = (head + 1) % MIDI_RING_SIZE;
+    g_midi_ring[head] = (MidiEvent){status, d1, d2};
+    atomic_store(&g_midi_ring_head, next);
+}
+
 static void sse_mark_dirty(void) {
     atomic_store(&g_sse_rack_dirty, 1);
     atomic_store(&g_sse_detail_dirty, 1);
@@ -679,6 +699,17 @@ static void state_save(void) {
                 char esc[1024];
                 json_escape(esc, sizeof(esc), slot->seq->source);
                 fprintf(f, ",\"seq_dsl\":\"%s\"", esc);
+            }
+            /* Save user presets */
+            if (slot->num_user_presets > 0) {
+                fprintf(f, ",\"user_presets\":[");
+                for (int p = 0; p < slot->num_user_presets; p++) {
+                    char esc_name[64];
+                    json_escape(esc_name, sizeof(esc_name), slot->user_presets[p].name);
+                    fprintf(f, "%s{\"name\":\"%s\",\"data\":{%s}}",
+                            p ? "," : "", esc_name, slot->user_presets[p].json);
+                }
+                fprintf(f, "],\"current_user_preset\":%d", slot->current_user_preset);
             }
         }
 
@@ -773,6 +804,60 @@ static void state_load(void) {
     fprintf(stderr, "[miniwave] state restored from %s\n", g_state_path);
 }
 
+/* ── User Preset System ──────────────────────────────────────────────── */
+
+/* Snapshot current instrument state as a user preset */
+static void slot_preset_snapshot(RackSlot *slot, InstrumentType *itype) {
+    if (!slot->state || !itype->json_save) return;
+    if (slot->num_user_presets >= MAX_USER_PRESETS) return;
+
+    int idx = slot->num_user_presets;
+    snprintf(slot->user_presets[idx].name, MAX_PRESET_NAME, "preset %d", idx + 1);
+    char buf[MAX_PRESET_JSON];
+    int len = itype->json_save(slot->state, buf, MAX_PRESET_JSON);
+    if (len > 0 && len < MAX_PRESET_JSON) {
+        memcpy(slot->user_presets[idx].json, buf, (size_t)len);
+        slot->user_presets[idx].json[len] = '\0';
+    }
+    slot->num_user_presets++;
+    slot->current_user_preset = idx;
+    fprintf(stderr, "[preset] saved '%s' (slot has %d presets)\n",
+            slot->user_presets[idx].name, slot->num_user_presets);
+}
+
+/* Load a user preset by index */
+static void slot_preset_load(RackSlot *slot, InstrumentType *itype, int idx) {
+    if (idx < 0 || idx >= slot->num_user_presets) return;
+    if (!slot->state || !itype->json_load) return;
+
+    itype->json_load(slot->state, slot->user_presets[idx].json);
+    slot->current_user_preset = idx;
+    fprintf(stderr, "[preset] loaded '%s' (%d/%d)\n",
+            slot->user_presets[idx].name, idx + 1, slot->num_user_presets);
+}
+
+/* CC81 = next preset (or create new) */
+static void slot_preset_next(RackSlot *slot, InstrumentType *itype) {
+    if (slot->num_user_presets == 0 ||
+        slot->current_user_preset >= slot->num_user_presets - 1) {
+        /* Past the end — snapshot current state as new preset */
+        slot_preset_snapshot(slot, itype);
+    } else {
+        slot_preset_load(slot, itype, slot->current_user_preset + 1);
+    }
+}
+
+/* CC80 = prev preset */
+static void slot_preset_prev(RackSlot *slot, InstrumentType *itype) {
+    if (slot->num_user_presets == 0) {
+        slot_preset_snapshot(slot, itype);
+        return;
+    }
+    int prev = slot->current_user_preset - 1;
+    if (prev < 0) prev = slot->num_user_presets - 1;
+    slot_preset_load(slot, itype, prev);
+}
+
 /* ── MIDI dispatch (raw bytes → rack) ──────────────────────────────── */
 
 /* Optional callback for broadcasting MIDI events (set by server after init) */
@@ -781,6 +866,9 @@ static void (*g_midi_broadcast)(int ch, int note, int vel, int is_on) = NULL;
 static inline void midi_dispatch_raw(const uint8_t *data, int len) {
     if (len < 1) return;
     uint8_t status = data[0];
+    uint8_t d1_raw = (len > 1) ? data[1] : 0;
+    uint8_t d2_raw = (len > 2) ? data[2] : 0;
+    midi_ring_push(status, d1_raw, d2_raw);
     int ch = status & 0x0F;
     if (ch < 0 || ch >= MAX_SLOTS) return;
 
@@ -849,12 +937,29 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
         if (d1 == 1) {
             slot->mod_wheel = (float)d2 / 127.0f;
         }
+        /* CC80/81 = user preset down/up */
+        if (d1 == 80 && d2 == 127) {
+            slot_preset_prev(slot, itype);
+            state_mark_dirty();
+            sse_mark_dirty();
+            slot_read_end();
+            return;
+        }
+        if (d1 == 81 && d2 == 127) {
+            slot_preset_next(slot, itype);
+            state_mark_dirty();
+            sse_mark_dirty();
+            slot_read_end();
+            return;
+        }
         itype->midi(st, status, d1, d2);
         state_mark_dirty();
+        atomic_store(&g_sse_detail_dirty, 1);
         break;
     case 0xC0: case 0xD0:
         itype->midi(st, status, d1, 0);
         state_mark_dirty();
+        atomic_store(&g_sse_detail_dirty, 1);
         break;
     }
     slot_read_end();

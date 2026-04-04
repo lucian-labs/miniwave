@@ -590,15 +590,20 @@ static int additive_json_status(void *state, char *buf, int max) {
     int pos = 0;
     pos += snprintf(buf + pos, (size_t)(max - pos),
         "\"instrument_type\":\"additive\","
-        "\"mode\":\"%s\",\"mode_index\":%d,"
-        "\"harmonics\":%d,\"active_voices\":%d,"
+        "\"active_voices\":%d,"
+        "\"volume\":%.4f,"
+        "\"params\":{"
+        "\"mode\":%d,\"harmonics\":%d,"
         "\"ratio\":%.4f,\"spread\":%.4f,\"rolloff\":%.4f,"
-        "\"inharmonicity\":%.4f,\"shape\":%.4f,\"release\":%.4f,"
-        "\"volume\":%.4f",
-        mode_names[s->mode], s->mode, s->num_harmonics, active,
+        "\"inharmonicity\":%.4f,\"shape\":%.4f,"
+        "\"attack\":%.4f,\"decay\":%.4f,\"sustain\":%.4f,\"release\":%.4f}",
+        active, (double)s->volume,
+        s->mode, s->num_harmonics,
         (double)s->cluster_ratio, (double)s->cluster_spread,
         (double)s->cluster_rolloff, (double)s->metal_inharmonicity,
-        (double)s->shape, (double)s->release, (double)s->volume);
+        (double)s->shape,
+        (double)s->attack, (double)s->decay, (double)s->sustain,
+        (double)s->release);
     return pos;
 }
 

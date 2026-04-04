@@ -103,14 +103,16 @@ static int build_rack_status_json(char *buf, int max) {
         "\"audio_backend\":\"%s\",\"local_mute\":%d,"
         "\"osc_port\":%d,\"mcast_active\":%d,\"mcast_group\":\"%s:%d\","
         "\"bus_active\":%d,\"bus_slot\":%d,"
-        "\"sse_clients\":%d,\"bpm\":%.1f}",
+        "\"sse_clients\":%d,\"bpm\":%.1f,"
+        "\"period_size\":%d,\"sample_rate\":%d,\"audio_device\":\"%s\",\"cpu_load\":%.3f,\"version\":\"%s\"}",
         (double)g_rack.master_volume, esc_midi,
         g_use_jack ? "JACK" : platform_audio_fallback_name(),
         g_rack.local_mute,
         DEFAULT_OSC_PORT, g_mcast_active,
         MCAST_GROUP, DEFAULT_MCAST_PORT,
         g_bus_active, g_bus_slot,
-        sse_count, (double)g_bpm);
+        sse_count, (double)g_bpm,
+        g_period_size, g_actual_srate, g_audio_device, (double)g_cpu_load, MINIWAVE_VERSION);
 
     return pos;
 }
@@ -185,10 +187,22 @@ static int build_ch_status_json_inner(int ch, char *buf, int max) {
 
 static int build_ch_status_json(int ch, char *buf, int max) {
     int len = build_ch_status_json_inner(ch, buf, max);
-    /* Strip trailing }, append keyseq state, re-close */
+    /* Strip trailing }, append keyseq + user preset state, re-close */
     if (len > 1 && buf[len - 1] == '}') {
         len--;
         len = append_keyseq_to_ch_status(ch, buf, len, max);
+
+        /* User presets */
+        RackSlot *slot = &g_rack.slots[ch];
+        char pname[64];
+        if (slot->current_user_preset >= 0 && slot->current_user_preset < slot->num_user_presets)
+            json_escape(pname, sizeof(pname), slot->user_presets[slot->current_user_preset].name);
+        else
+            pname[0] = '\0';
+        len += snprintf(buf + len, (size_t)(max - len),
+            ",\"user_preset\":%d,\"user_preset_name\":\"%s\",\"num_user_presets\":%d",
+            slot->current_user_preset, pname, slot->num_user_presets);
+
         if (len < max - 1) buf[len++] = '}';
         buf[len] = '\0';
     }
@@ -790,6 +804,50 @@ static void http_handle_api(int fd, const char *body) {
             strncpy(g_ks_presets[idx].name, new_name, PATCH_NAME_MAX - 1);
             ks_presets_save();
             rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        }
+    }
+    else if (strcmp(type_str, "preset_rename") == 0) {
+        int ch = 0, idx = -1;
+        char new_name[MAX_PRESET_NAME] = "";
+        json_get_int(body, "channel", &ch);
+        json_get_int(body, "index", &idx);
+        json_get_string(body, "name", new_name, sizeof(new_name));
+        if (ch >= 0 && ch < MAX_SLOTS && idx >= 0 && idx < g_rack.slots[ch].num_user_presets && new_name[0]) {
+            strncpy(g_rack.slots[ch].user_presets[idx].name, new_name, MAX_PRESET_NAME - 1);
+            state_mark_dirty();
+            sse_mark_dirty();
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"invalid\"}");
+        }
+    }
+    else if (strcmp(type_str, "preset_save") == 0) {
+        int ch = 0;
+        json_get_int(body, "channel", &ch);
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            if (slot->active && slot->type_idx >= 0) {
+                slot_preset_snapshot(slot, g_type_registry[slot->type_idx]);
+                state_mark_dirty();
+                sse_mark_dirty();
+                rlen = snprintf(resp, sizeof(resp), "{\"ok\":true,\"index\":%d}", slot->current_user_preset);
+            } else {
+                rlen = snprintf(resp, sizeof(resp), "{\"error\":\"no instrument\"}");
+            }
+        }
+    }
+    else if (strcmp(type_str, "preset_load") == 0) {
+        int ch = 0, idx = 0;
+        json_get_int(body, "channel", &ch);
+        json_get_int(body, "index", &idx);
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            if (slot->active && slot->type_idx >= 0) {
+                slot_preset_load(slot, g_type_registry[slot->type_idx], idx);
+                state_mark_dirty();
+                sse_mark_dirty();
+                rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+            }
         }
     }
     else if (strcmp(type_str, "bpm") == 0) {
@@ -1890,6 +1948,28 @@ static void *http_thread_fn(void *arg) {
                 }
             } else if (detail_dirty) {
                 atomic_store(&g_sse_detail_dirty, 1);
+            }
+        }
+
+        /* Flush MIDI ring buffer to SSE */
+        {
+            int tail = atomic_load(&g_midi_ring_tail);
+            int head = atomic_load(&g_midi_ring_head);
+            if (tail != head) {
+                char json[2048];
+                int pos = snprintf(json, sizeof(json), "{\"type\":\"midi_events\",\"events\":[");
+                int first = 1;
+                while (tail != head) {
+                    MidiEvent ev = g_midi_ring[tail];
+                    tail = (tail + 1) % MIDI_RING_SIZE;
+                    pos += snprintf(json + pos, sizeof(json) - (size_t)pos,
+                        "%s[%d,%d,%d]", first ? "" : ",", ev.status, ev.d1, ev.d2);
+                    first = 0;
+                    if (pos > (int)sizeof(json) - 32) break;
+                }
+                atomic_store(&g_midi_ring_tail, tail);
+                pos += snprintf(json + pos, sizeof(json) - (size_t)pos, "]}");
+                sse_broadcast("midi_events", json);
             }
         }
 
