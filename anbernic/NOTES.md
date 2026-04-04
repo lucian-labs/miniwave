@@ -166,3 +166,75 @@ Could potentially run Termux + a native audio app, but that's janky.
 **Skip unless you find confirmed Linux flash instructions for A133P
 handhelds.** The specs are tempting but Android is a wall.
 If someone cracks the bootloader it becomes the best device on this list.
+
+---
+
+# M5Stack Cardputer (StampS3)
+
+## Status: Research — BUY candidate
+
+## Hardware
+
+- ESP32-S3, dual-core Xtensa LX7 @ 240MHz
+- 8MB PSRAM, 8MB flash
+- 1.14" LCD, 135x240
+- I2S DAC + built-in speaker
+- 56-key QWERTY keyboard
+- USB-C
+- Wi-Fi + Bluetooth
+- GPIO broken out
+- Credit card sized
+- ~$80 CAD on Amazon (~$58 USD)
+
+## Hackability: VERY YES
+
+Not Linux — it's a microcontroller (ESP32-S3, Arduino/ESP-IDF). But
+for noisemaking that's actually an advantage:
+
+- **I2S audio** — write directly to DAC, deterministic latency, no
+  driver/ALSA headaches
+- **56 keys** — enough for a chromatic keyboard layout on QWERTY
+- **ESP32 synth scene is huge** — tons of existing Arduino synth libs
+- **GPIO** — wire up pots, sensors, expression pedals, whatever
+- **Wi-Fi + BT** — OSC over Wi-Fi, MIDI over BT, both built in
+- **Tiny** — actually pocketable, not "fits in a cargo pocket" pocketable
+
+Won't run miniwave (no Linux, no ALSA). Needs purpose-built ESP-IDF
+or Arduino code. But the keyboard + speaker + wireless makes it the
+most instrument-like device on this list out of the box.
+
+## What it's good for
+
+- Tiny keyboard synth (map QWERTY to notes)
+- Chiptune / 8-bit noise
+- BT MIDI controller (keyboard sends MIDI to another device)
+- Generative bleeps triggered by buttons
+- OSC control surface for other devices
+- Sensor-based noise (hook up a photoresistor, make theremin vibes)
+
+## What it's NOT good for
+
+- High-fidelity audio (small speaker, 8-bit I2S vibes)
+- Complex multi-voice synthesis (240MHz is fast for a MCU but slow
+  for DSP compared to ARM Linux handhelds)
+- Anything that needs a real screen
+
+## Verdict
+
+**Best instrument-feel device on the list.** 56 keys + speaker + wireless
+for $80 CAD. Different category from the Linux handhelds — lo-fi
+microcontroller territory — but that's a feature not a bug.
+
+---
+
+# Devices evaluated and skipped
+
+| Device | Why | Price seen |
+|--------|-----|-----------|
+| Oilsky digital player | No-brand, blob firmware, no OS access | — |
+| Cayin N6ii (A01/AK4497EQ) | Amazing DAC but $350, Android, overkill | $350 |
+| Anbernic RG35XX H | Great but $100 on marketplace, $60 new | $100 |
+| Anbernic RG351MP | Old RK3326, no Wi-Fi, $100 asking (overpriced) | $100 |
+| Labists Smart Mirror HM1 | Just a Pi in a box, not portable | — |
+
+Note: all prices in CAD unless marked USD.
