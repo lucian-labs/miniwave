@@ -19,13 +19,22 @@ COMMON_HDRS = $(COMMON)/osc.h $(COMMON)/instruments.h $(COMMON)/presets.h \
               $(COMMON)/platform.h $(COMMON)/rack.h $(COMMON)/server.h \
               $(COMMON)/jack_backend.h
 
-.PHONY: all clean
+.PHONY: all clean headless
 
 all: $(TARGET)
 	@ln -sf $(COMMON)/web web 2>/dev/null || true
 
 $(TARGET): $(SRC) $(COMMON_HDRS)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS)
+
+UNAME_S := $(shell uname -s)
+HEADLESS_LDFLAGS = -lm -lpthread
+ifeq ($(UNAME_S),Linux)
+  HEADLESS_LDFLAGS += -lrt
+endif
+
+headless: $(SRC) $(COMMON_HDRS)
+	$(CC) $(CFLAGS) -DHEADLESS -o $(TARGET) $(SRC) $(HEADLESS_LDFLAGS)
 
 clean:
 	rm -f $(TARGET)

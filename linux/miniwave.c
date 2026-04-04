@@ -6,7 +6,6 @@
 
 #define _GNU_SOURCE
 #define __USE_MISC
-#define ALSA_PCM_NEW_HW_PARAMS_API
 
 #include <errno.h>
 #include <math.h>
@@ -27,15 +26,45 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <fcntl.h>
+
+#ifndef HEADLESS
+#define ALSA_PCM_NEW_HW_PARAMS_API
 #include <alsa/asoundlib.h>
 #include <jack/jack.h>
 #include <jack/midiport.h>
+#endif
 
 /* ── Common code ───────────────────────────────────────────────────── */
 
 #include "../common/rack.h"
 #include "../common/server.h"
+#ifndef HEADLESS
 #include "../common/jack_backend.h"
+#endif
+
+#ifdef HEADLESS
+/* ══════════════════════════════════════════════════════════════════════
+ *  Headless stubs — no ALSA/JACK, MIDI is HTTP-only
+ * ══════════════════════════════════════════════════════════════════════ */
+static int  platform_midi_init(void) { return -1; }
+static int  platform_midi_connect(const char *addr) { (void)addr; return -1; }
+static void platform_midi_disconnect(void) {}
+static int  platform_midi_list_devices(char d[][64], char n[][128], int m) {
+    (void)d; (void)n; (void)m; return 0;
+}
+static void *platform_midi_thread(void *arg) { (void)arg; return NULL; }
+static void platform_midi_cleanup(void) {}
+static int  platform_exe_dir(char *buf, int max) {
+    ssize_t len = readlink("/proc/self/exe", buf, (size_t)(max - 1));
+    if (len <= 0) return -1;
+    buf[len] = '\0';
+    char *slash = strrchr(buf, '/');
+    if (slash) *(slash + 1) = '\0';
+    return 0;
+}
+static const char *platform_audio_fallback_name(void) { return "pipe"; }
+
+#else /* !HEADLESS */
 
 /* ══════════════════════════════════════════════════════════════════════
  *  Platform: ALSA Sequencer MIDI
@@ -427,6 +456,8 @@ static const char *platform_audio_fallback_name(void) {
     return "ALSA";
 }
 
+#endif /* !HEADLESS */
+
 /* ── Usage ──────────────────────────────────────────────────────────── */
 
 static void usage(const char *prog) {
@@ -435,10 +466,12 @@ static void usage(const char *prog) {
         "Usage: %s [options]\n"
         "  -m C:P    ALSA seq MIDI source client:port (e.g. 20:0)\n"
         "  -o DEV    ALSA audio output (default: default)\n"
+        "  -A MODE   Audio backend: alsa, jack, pipe (default: auto)\n"
         "  -c N      Pre-configure channels 1-N with FM synth (default: 0)\n"
         "  -O PORT   OSC port (default: 9000)\n"
         "  -W PORT   HTTP/SSE port for WaveUI (default: 8080, 0 to disable)\n"
         "  -P SIZE   Audio period size (default: 64)\n"
+        "  -S DIR    State directory (default: ~/.config/miniwave)\n"
         "  -h        Help\n", prog);
 }
 
@@ -451,26 +484,32 @@ int main(int argc, char *argv[]) {
 
     char midi_dev[64] = "";
     char audio_dev[64] = "default";
+    char audio_mode[16] = "auto";
+    char state_dir[512] = "";
     int pre_config = 0;
     int osc_port = DEFAULT_OSC_PORT;
     int http_port = DEFAULT_HTTP_PORT;
     int period_size = DEFAULT_PERIOD;
 
     int opt;
-    while ((opt = getopt(argc, argv, "m:o:c:O:W:P:h")) != -1) {
+    while ((opt = getopt(argc, argv, "m:o:A:c:O:W:P:S:h")) != -1) {
         switch (opt) {
         case 'm': strncpy(midi_dev, optarg, sizeof(midi_dev) - 1); break;
         case 'o': strncpy(audio_dev, optarg, sizeof(audio_dev) - 1); break;
+        case 'A': strncpy(audio_mode, optarg, sizeof(audio_mode) - 1); break;
         case 'c': pre_config = atoi(optarg); break;
         case 'O': osc_port = atoi(optarg); break;
         case 'W': http_port = atoi(optarg); break;
         case 'P': period_size = atoi(optarg); break;
+        case 'S': strncpy(state_dir, optarg, sizeof(state_dir) - 1); break;
         case 'h': /* fall through */
         default:
             usage(argv[0]);
             return opt == 'h' ? 0 : 1;
         }
     }
+
+    int use_pipe = (strcmp(audio_mode, "pipe") == 0);
 
     if (pre_config < 0) pre_config = 0;
     if (pre_config > MAX_SLOTS) pre_config = MAX_SLOTS;
@@ -479,6 +518,15 @@ int main(int argc, char *argv[]) {
 
     rack_init();
     state_init_path();
+
+    /* Override state directory if -S specified */
+    if (state_dir[0]) {
+        mkdir(state_dir, 0755);
+        snprintf(g_state_path, sizeof(g_state_path), "%s/rack.json", state_dir);
+        snprintf(g_patches_path, sizeof(g_patches_path), "%s/patches.json", state_dir);
+        snprintf(g_keyseq_presets_path, sizeof(g_keyseq_presets_path), "%s/keyseq_presets.json", state_dir);
+    }
+
     state_load();
     keyseq_wire_graph_broadcast();
 
@@ -489,23 +537,40 @@ int main(int argc, char *argv[]) {
 
     /* ── ALSA Sequencer MIDI ─────────────────────────────────────── */
 
-    if (platform_midi_init() == 0) {
-        if (midi_dev[0] != '\0') {
-            platform_midi_connect(midi_dev);
-        } else {
-            fprintf(stderr, "[miniwave] MIDI: ready (use -m client:port or OSC /midi/device)\n");
+    if (!use_pipe) {
+        if (platform_midi_init() == 0) {
+            if (midi_dev[0] != '\0') {
+                platform_midi_connect(midi_dev);
+            } else {
+                fprintf(stderr, "[miniwave] MIDI: ready (use -m client:port or OSC /midi/device)\n");
+            }
         }
     }
 
-    /* ── Audio Backend: try JACK first, fall back to ALSA ─────── */
+    /* ── Audio Backend ────────────────────────────────────────────── */
 
     int use_jack = 0;
+#ifndef HEADLESS
     snd_pcm_t *pcm = NULL;
+#endif
 
-    if (jack_init() == 0) {
-        use_jack = 1;
-        g_use_jack = 1;
-    } else {
+    if (use_pipe) {
+        fprintf(stderr, "[miniwave] audio: pipe (stdout float32 stereo @ %dHz period=%d)\n",
+                SAMPLE_RATE, period_size);
+    }
+#ifndef HEADLESS
+    else if (strcmp(audio_mode, "jack") == 0 || strcmp(audio_mode, "auto") == 0) {
+        if (jack_init() == 0) {
+            use_jack = 1;
+            g_use_jack = 1;
+        } else if (strcmp(audio_mode, "jack") == 0) {
+            fprintf(stderr, "[miniwave] ERROR: JACK requested but not available\n");
+            platform_midi_cleanup();
+            return 1;
+        }
+    }
+
+    if (!use_pipe && !use_jack) {
         int err = snd_pcm_open(&pcm, audio_dev, SND_PCM_STREAM_PLAYBACK, 0);
         if (err < 0) {
             fprintf(stderr, "[miniwave] ERROR: can't open audio %s: %s\n",
@@ -540,13 +605,14 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "[miniwave] audio: ALSA %s @ %uHz period=%d\n",
                 audio_dev, rate, period_size);
     }
+#endif
 
     /* ── Shared memory bus ─────────────────────────────────────── */
 
     WaveosBus *bus = NULL;
     int bus_slot = -1;
 
-    {
+    if (!use_pipe) {
         int fd = shm_open(WAVEOS_BUS_SHM_NAME, O_RDWR, 0);
         if (fd >= 0) {
             bus = mmap(NULL, sizeof(WaveosBus), PROT_READ | PROT_WRITE,
@@ -581,31 +647,34 @@ int main(int argc, char *argv[]) {
         }
     }
 
+#ifndef HEADLESS
     if (use_jack) {
         g_jack.bus = bus;
         g_jack.bus_slot = bus_slot;
     }
+#endif
     g_bus_active = (bus && bus_slot >= 0) ? 1 : 0;
     g_bus_slot = bus_slot;
 
-    /* ── Audio buffers (ALSA path only) ───────────────────────── */
+    /* ── Audio buffers (non-JACK paths) ──────────────────────── */
 
     int16_t *audio_buf = NULL;
     float   *mix_buf   = NULL;
     float   *slot_buf  = NULL;
 
     if (!use_jack) {
-        audio_buf = calloc((size_t)(period_size * CHANNELS), sizeof(int16_t));
+        if (!use_pipe)
+            audio_buf = calloc((size_t)(period_size * CHANNELS), sizeof(int16_t));
         mix_buf   = calloc((size_t)(period_size * CHANNELS), sizeof(float));
         slot_buf  = calloc((size_t)(period_size * CHANNELS), sizeof(float));
-        if (!audio_buf || !mix_buf || !slot_buf) {
+        if (!mix_buf || !slot_buf || (!use_pipe && !audio_buf)) {
             fprintf(stderr, "[miniwave] ERROR: alloc failed\n");
             goto cleanup;
         }
     }
 
     fprintf(stderr, "[miniwave] running [%s]%s%s — %d types registered\n",
-            use_jack ? "JACK" : "ALSA",
+            use_pipe ? "PIPE" : use_jack ? "JACK" : "ALSA",
             (bus && bus_slot >= 0) ? " [BUS]" : "",
             (http_port > 0) ? " [HTTP]" : "",
             g_n_types);
@@ -614,6 +683,7 @@ int main(int argc, char *argv[]) {
 
     pthread_t midi_tid = 0;
 
+#ifndef HEADLESS
     if (g_seq) {
         if (pthread_create(&midi_tid, NULL, platform_midi_thread, NULL) != 0) {
             fprintf(stderr, "[miniwave] ERROR: can't create MIDI thread\n");
@@ -621,6 +691,7 @@ int main(int argc, char *argv[]) {
         }
         fprintf(stderr, "[miniwave] MIDI seq thread started\n");
     }
+#endif
 
     /* ── Start multicast broadcast thread ─────────────────────── */
 
@@ -660,7 +731,36 @@ int main(int argc, char *argv[]) {
 
     /* ── Audio render loop ─────────────────────────────────────── */
 
-    if (use_jack) {
+    if (use_pipe) {
+        /* Pipe backend: write raw float32 stereo PCM to stdout.
+         * Use -P 960 for 20ms Opus-aligned frames at 48kHz. */
+        struct timespec frame_time;
+        long frame_ns = (long)period_size * 1000000000L / SAMPLE_RATE;
+
+        while (!g_quit) {
+            clock_gettime(CLOCK_MONOTONIC, &frame_time);
+
+            render_mix(mix_buf, slot_buf, period_size, SAMPLE_RATE);
+
+            size_t n = fwrite(mix_buf, sizeof(float),
+                              (size_t)(period_size * CHANNELS), stdout);
+            if (n == 0) break; /* pipe closed */
+            fflush(stdout);
+
+            /* pace to real time */
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            long elapsed = (now.tv_sec - frame_time.tv_sec) * 1000000000L
+                         + (now.tv_nsec - frame_time.tv_nsec);
+            long remain = frame_ns - elapsed;
+            if (remain > 0) {
+                struct timespec sl = { .tv_sec = 0, .tv_nsec = remain };
+                nanosleep(&sl, NULL);
+            }
+        }
+    }
+#ifndef HEADLESS
+    else if (use_jack) {
         if (jack_start() != 0) {
             fprintf(stderr, "[miniwave] ERROR: JACK activate failed\n");
             goto cleanup;
@@ -698,6 +798,7 @@ int main(int argc, char *argv[]) {
             }
         }
     }
+#endif
 
     /* ── Shutdown ───────────────────────────────────────────────── */
 
@@ -726,8 +827,10 @@ cleanup:
         munmap(bus, sizeof(WaveosBus));
     }
     platform_midi_cleanup();
+#ifndef HEADLESS
     jack_cleanup();
     if (pcm) snd_pcm_close(pcm);
+#endif
     free(audio_buf);
     free(mix_buf);
     free(slot_buf);
