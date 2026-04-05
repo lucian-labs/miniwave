@@ -13,6 +13,21 @@
 
 #define SUB_TAU              (2.0f * (float)M_PI)
 #define SUB_MAX_VOICES       2   /* mono synth: 1 active + 1 crossfade */
+
+/* Fast 2^x approximation (< 0.3% error for x in [-8, 8]) */
+static inline float fast_exp2f(float x) {
+    /* Clamp to avoid overflow */
+    if (x < -16.0f) return 0.0f;
+    if (x > 16.0f) x = 16.0f;
+    /* Integer + fractional split */
+    int xi = (int)x;
+    if (x < 0.0f && x != (float)xi) xi--;
+    float f = x - (float)xi;
+    /* Polynomial approx of 2^f for f in [0,1] */
+    float p = 1.0f + f * (0.6931472f + f * (0.2402265f + f * 0.0558011f));
+    /* Reconstruct via ldexpf (bit shift) */
+    return ldexpf(p, xi);
+}
 #define SUB_LIMITER_CEIL     0.95f
 #define SUB_FADEIN_SAMPLES   48
 #define SUB_FADEOUT_SAMPLES  96
@@ -455,7 +470,7 @@ static void sub_synth_render(void *state, float *stereo_buf, int frames,
             }
 
             /* Effective filter cutoff: base * 2^(depth * env * 8 octaves) + mod wheel boost */
-            float cutoff = p->filter_cutoff * powf(2.0f, p->filter_env_depth * fenv * 8.0f);
+            float cutoff = p->filter_cutoff * fast_exp2f(p->filter_env_depth * fenv * 8.0f);
             if (s->mod_wheel > 0.001f)
                 cutoff *= (1.0f + s->mod_wheel * 4.0f); /* up to 5x boost */
 

@@ -91,9 +91,11 @@ typedef struct {
 /* ── State ────────────────────────────────────────────────────────────── */
 
 typedef struct {
-    /* Wavetable */
+    /* Wavetable — double buffered for glitch-free rebuilds */
     float table[ADD_TABLE_SIZE];
+    float table_back[ADD_TABLE_SIZE];  /* build target */
     int   table_dirty;      /* 1 = needs rebuild */
+    int   table_building;   /* 1 = build in progress (render uses front) */
 
     /* Mode */
     int   mode;             /* ADD_MODE_* */
@@ -142,7 +144,8 @@ static void additive_build_table(AdditiveState *s) {
     static const char *mode_names[] = {"harmonic","cluster","formant","metallic","noise","expr"};
     fprintf(stderr, "[additive] build_table: mode=%s harmonics=%d\n",
             s->mode < ADD_MODE_COUNT ? mode_names[s->mode] : "?", s->num_harmonics);
-    memset(s->table, 0, sizeof(s->table));
+    s->table_building = 1;
+    memset(s->table_back, 0, sizeof(s->table_back));
 
     int nh = s->num_harmonics;
     if (nh < 1) nh = 1;
@@ -226,22 +229,25 @@ static void additive_build_table(AdditiveState *s) {
 
         for (int i = 0; i < ADD_TABLE_SIZE; i++) {
             float t = (float)i / (float)ADD_TABLE_SIZE;
-            s->table[i] += amp * sinf(ADD_TAU * freq_mult * t + phase_off);
+            s->table_back[i] += amp * sinf(ADD_TAU * freq_mult * t + phase_off);
         }
     }
 
     /* Normalize */
     float peak = 0;
     for (int i = 0; i < ADD_TABLE_SIZE; i++) {
-        float a = fabsf(s->table[i]);
+        float a = fabsf(s->table_back[i]);
         if (a > peak) peak = a;
     }
     if (peak > 0.0001f) {
         float scale = 1.0f / peak;
         for (int i = 0; i < ADD_TABLE_SIZE; i++)
-            s->table[i] *= scale;
+            s->table_back[i] *= scale;
     }
 
+    /* Swap: copy back → front (render reads front) */
+    memcpy(s->table, s->table_back, sizeof(s->table));
+    s->table_building = 0;
     s->table_dirty = 0;
 }
 
@@ -435,6 +441,8 @@ static void additive_midi(void *state, uint8_t status, uint8_t d1, uint8_t d2) {
             for (int i = 0; i < ADD_MAX_VOICES; i++) s->voices[i].active = 0;
             break;
         }
+        /* Rebuild table on CC change thread (not render) */
+        if (s->table_dirty) additive_build_table(s);
         break;
     }
     }
@@ -444,7 +452,7 @@ static void additive_render(void *state, float *stereo_buf, int frames, int samp
     AdditiveState *s = (AdditiveState *)state;
     float dt = 1.0f / (float)sample_rate;
 
-    if (s->table_dirty) additive_build_table(s);
+    /* Table rebuild happens on param-change thread, not here */
 
     /* Pitch bend from cents_mod */
     float pitch_mult = (s->cents_mod != 0.0f)
@@ -462,7 +470,6 @@ static void additive_render(void *state, float *stereo_buf, int frames, int samp
 
             float env = additive_env_tick(v, s->attack, s->decay, s->sustain, s->release, dt);
             if (env <= 0.0f && v->env_state == 3) {
-                fprintf(stderr, "[additive] voice %d deactivated (release complete, note=%d)\n", vi, v->note);
                 v->active = 0; continue;
             }
 
@@ -505,8 +512,6 @@ static void additive_render(void *state, float *stereo_buf, int frames, int samp
 static void additive_set_param(void *state, const char *name, float value) {
     AdditiveState *s = (AdditiveState *)state;
 
-    fprintf(stderr, "[additive] set_param %s = %.4f\n", name, (double)value);
-
     if (strcmp(name, "volume") == 0)    { s->volume = value < 0 ? 0 : value > 1 ? 1 : value; }
     else if (strcmp(name, "mode") == 0) { s->mode = (int)value % ADD_MODE_COUNT; s->table_dirty = 1; }
     else if (strcmp(name, "harmonics") == 0) { s->num_harmonics = (int)value; if (s->num_harmonics<1) s->num_harmonics=1; if (s->num_harmonics>ADD_MAX_HARMONICS) s->num_harmonics=ADD_MAX_HARMONICS; s->table_dirty=1; }
@@ -537,6 +542,9 @@ static void additive_set_param(void *state, const char *name, float value) {
         int h = atoi(name + 6);
         if (h >= 0 && h < ADD_MAX_HARMONICS) { s->harm_phases[h] = value; s->table_dirty = 1; }
     }
+
+    /* Rebuild table immediately on param change thread (not in render) */
+    if (s->table_dirty) additive_build_table(s);
 }
 
 /* ── OSC ──────────────────────────────────────────────────────────────── */
@@ -570,6 +578,7 @@ static void additive_osc_handle(void *state, const char *sub_path,
         }
         s->table_dirty = 1;
     }
+    if (s->table_dirty) additive_build_table(s);
     (void)iargs; (void)ni;
 }
 
@@ -680,6 +689,7 @@ static int additive_json_load(void *state, const char *json) {
         ke_compile(&s->phase_expr, expr_buf);
     }
     s->table_dirty = 1;
+    additive_build_table(s);
     fprintf(stderr, "[additive] json_load done: mode=%d harmonics=%d vol=%.2f\n",
             s->mode, s->num_harmonics, (double)s->volume);
     return 0;

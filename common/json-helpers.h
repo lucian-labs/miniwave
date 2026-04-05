@@ -102,4 +102,26 @@ static int json_get_farray_first(const char *json, const char *key, float *out) 
     return -1;
 }
 
+static int json_get_iarray(const char *json, const char *key, int *out, int max_out) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return 0;
+    p += strlen(pattern);
+    while (*p == ' ' || *p == ':') p++;
+    if (*p != '[') return 0;
+    p++;
+    int n = 0;
+    while (n < max_out) {
+        while (*p == ' ') p++;
+        if (*p == ']' || !*p) break;
+        if ((*p >= '0' && *p <= '9') || *p == '-') {
+            out[n++] = atoi(p);
+            while (*p && *p != ',' && *p != ']') p++;
+            if (*p == ',') p++;
+        } else break;
+    }
+    return n;
+}
+
 #endif /* MINIWAVE_JSON_HELPERS_H */

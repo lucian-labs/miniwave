@@ -448,8 +448,10 @@ typedef struct KeySeq {
     /* Callbacks */
     void   *inst_state;
     void  (*midi_fn)(void *, uint8_t, uint8_t, uint8_t);
+    void  (*real_midi_fn)(void *, uint8_t, uint8_t, uint8_t); /* unwrapped instrument midi */
     void  (*param_fn)(void *state, const char *param_name, float value);
     void  (*graph_fn)(const char *json, int len);
+    void   *slot_ptr;     /* back-pointer to RackSlot for scale/chord */
     uint8_t midi_channel;
 
     char  source[512];
@@ -804,7 +806,10 @@ static void keyseq_tick_voice(KeySeq *ks, KeySeqVoice *v, float dt) {
 
     /* Gate off */
     if (v->gate_open && v->gate_elapsed >= gate_sec) {
-        if (v->last_played_note >= 0) keyseq_fire_off(ks, v->last_played_note);
+        if (v->last_played_note >= 0) {
+            keyseq_fire_off(ks, v->last_played_note);
+            v->last_played_note = -1;
+        }
         v->gate_open = 0;
     }
 
@@ -844,6 +849,9 @@ static void keyseq_tick_voice(KeySeq *ks, KeySeqVoice *v, float dt) {
         if (target < 0) target = 0; if (target > 127) target = 127;
         ks->cents_mod = (v->algo_n - (float)target) * 100.0f;
         int vel = (int)(v->algo_v * 127.0f);
+        /* Always release previous note before firing new one */
+        if (v->last_played_note >= 0)
+            keyseq_fire_off(ks, v->last_played_note);
         keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
         v->last_played_note = target;
         v->gate_open = 1;
@@ -855,6 +863,9 @@ static void keyseq_tick_voice(KeySeq *ks, KeySeqVoice *v, float dt) {
         int target = v->root_note + ks->offsets[v->current_step];
         if (target < 0) target = 0; if (target > 127) target = 127;
         int vel = (int)(v->root_velocity * ks->levels[v->current_step] * 127.0f);
+        /* Always release previous note before firing new one */
+        if (v->last_played_note >= 0)
+            keyseq_fire_off(ks, v->last_played_note);
         keyseq_fire_on(ks, target, vel > 0 ? vel : 1);
         v->last_played_note = target;
         v->gate_open = 1;

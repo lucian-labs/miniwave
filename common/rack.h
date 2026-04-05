@@ -8,7 +8,7 @@
 #ifndef MINIWAVE_RACK_H
 #define MINIWAVE_RACK_H
 
-#define MINIWAVE_VERSION "0.3.1"
+#define MINIWAVE_VERSION "0.6.3"
 
 #include <errno.h>
 #include <math.h>
@@ -264,6 +264,7 @@ static void rack_init(void) {
 }
 
 static void state_save(void);  /* forward decl */
+static void scale_chord_midi_shim(void *, uint8_t, uint8_t, uint8_t);  /* forward decl */
 
 static int rack_set_slot(int channel, const char *type_name) {
     if (channel < 0 || channel >= MAX_SLOTS) return -1;
@@ -352,13 +353,15 @@ static int rack_set_slot(int channel, const char *type_name) {
     slot->keyseq = calloc(1, sizeof(KeySeq));
     if (slot->seq) {
         seq_init(slot->seq);
-        seq_bind(slot->seq, new_state, itype->midi, (uint8_t)(channel & 0x0F));
+        seq_bind(slot->seq, new_state, scale_chord_midi_shim, (uint8_t)(channel & 0x0F));
     }
     if (slot->keyseq) {
         keyseq_init(slot->keyseq);
-        keyseq_bind(slot->keyseq, new_state, itype->midi,
+        keyseq_bind(slot->keyseq, new_state, scale_chord_midi_shim,
                      itype->set_param ? itype->set_param : NULL,
                      (uint8_t)(channel & 0x0F));
+        slot->keyseq->real_midi_fn = itype->midi;
+        slot->keyseq->slot_ptr = slot;
     }
 
     atomic_fetch_add(&slot->gen, 1);
@@ -671,8 +674,8 @@ static void state_save(void) {
     FILE *f = fopen(g_state_path, "w");
     if (!f) return;
 
-    fprintf(f, "{\n  \"master_volume\": %.4f,\n  \"slots\": [\n",
-            (double)g_rack.master_volume);
+    fprintf(f, "{\n  \"master_volume\": %.4f,\n  \"focused_ch\": %d,\n  \"slots\": [\n",
+            (double)g_rack.master_volume, g_rack.focused_ch);
 
     for (int i = 0; i < MAX_SLOTS; i++) {
         RackSlot *slot = &g_rack.slots[i];
@@ -688,11 +691,12 @@ static void state_save(void) {
                 int n = itype->json_save(slot->state, inst_buf, (int)sizeof(inst_buf));
                 if (n > 0) fprintf(f, ",%s", inst_buf);
             }
-            /* Save slot-level keyseq DSL */
-            if (slot->keyseq && slot->keyseq->enabled && slot->keyseq->source[0]) {
+            /* Save slot-level keyseq DSL + enabled state */
+            if (slot->keyseq && slot->keyseq->source[0]) {
                 char esc[1024];
                 json_escape(esc, sizeof(esc), slot->keyseq->source);
-                fprintf(f, ",\"keyseq_dsl\":\"%s\"", esc);
+                fprintf(f, ",\"keyseq_dsl\":\"%s\",\"keyseq_enabled\":%d",
+                        esc, slot->keyseq->enabled ? 1 : 0);
             }
             /* Save slot-level seq DSL */
             if (slot->seq && slot->seq->source[0]) {
@@ -710,6 +714,20 @@ static void state_save(void) {
                             p ? "," : "", esc_name, slot->user_presets[p].json);
                 }
                 fprintf(f, "],\"current_user_preset\":%d", slot->current_user_preset);
+            }
+            /* Save scale */
+            if (slot->scale_len > 0 && slot->scale_root >= 0) {
+                fprintf(f, ",\"scale_root\":%d,\"scale\":[", slot->scale_root);
+                for (int s = 0; s < slot->scale_len; s++)
+                    fprintf(f, "%s%d", s ? "," : "", slot->scale_degrees[s]);
+                fprintf(f, "]");
+            }
+            /* Save chord */
+            if (slot->chord_len > 0) {
+                fprintf(f, ",\"chord\":[");
+                for (int c = 0; c < slot->chord_len; c++)
+                    fprintf(f, "%s%d", c ? "," : "", slot->chord_intervals[c]);
+                fprintf(f, "]");
             }
         }
 
@@ -743,6 +761,9 @@ static void state_load(void) {
     float mv;
     if (json_get_float(json, "master_volume", &mv) == 0)
         g_rack.master_volume = mv;
+    int fch = 0;
+    if (json_get_int(json, "focused_ch", &fch) == 0 && fch >= 0 && fch < MAX_SLOTS)
+        g_rack.focused_ch = fch;
 
     const char *slots_start = strstr(json, "\"slots\"");
     if (!slots_start) { free(json); return; }
@@ -783,15 +804,34 @@ static void state_load(void) {
                     itype->json_load(slot->state, slot_json);
                 }
 
-                /* Restore slot-level keyseq DSL */
+                /* Restore slot-level keyseq DSL + enabled state */
                 char ks_dsl[512] = "";
                 if (slot->keyseq && json_get_string(slot_json, "keyseq_dsl", ks_dsl, sizeof(ks_dsl)) == 0 && ks_dsl[0]) {
                     keyseq_parse(slot->keyseq, ks_dsl);
+                    int ks_en = 1;
+                    if (json_get_int(slot_json, "keyseq_enabled", &ks_en) == 0)
+                        slot->keyseq->enabled = ks_en;
                 }
                 /* Restore slot-level seq DSL */
                 char seq_dsl[512] = "";
                 if (slot->seq && json_get_string(slot_json, "seq_dsl", seq_dsl, sizeof(seq_dsl)) == 0 && seq_dsl[0]) {
                     seq_parse(slot->seq, seq_dsl);
+                }
+                /* Restore scale */
+                int scale_root;
+                if (json_get_int(slot_json, "scale_root", &scale_root) == 0) {
+                    slot->scale_root = scale_root;
+                    int degrees[MAX_SCALE_DEGREES];
+                    int n = json_get_iarray(slot_json, "scale", degrees, MAX_SCALE_DEGREES);
+                    for (int s = 0; s < n; s++) slot->scale_degrees[s] = (uint8_t)degrees[s];
+                    slot->scale_len = n;
+                }
+                /* Restore chord */
+                {
+                    int intervals[MAX_CHORD_INTERVALS];
+                    int n = json_get_iarray(slot_json, "chord", intervals, MAX_CHORD_INTERVALS);
+                    for (int c = 0; c < n; c++) slot->chord_intervals[c] = (uint8_t)intervals[c];
+                    slot->chord_len = n;
                 }
             }
         }
@@ -858,10 +898,131 @@ static void slot_preset_prev(RackSlot *slot, InstrumentType *itype) {
     slot_preset_load(slot, itype, prev);
 }
 
+/* ── Scale + Chord Helpers ────────────────────────────────────────── */
+
+/* Quantize a MIDI note to the nearest scale degree */
+static inline uint8_t scale_quantize(const RackSlot *slot, uint8_t note) {
+    if (slot->scale_len <= 0 || slot->scale_root < 0) return note;
+    int root = slot->scale_root;
+    int rel = ((int)note - root) % 12;
+    if (rel < 0) rel += 12;
+    int best = 0, best_dist = 99;
+    for (int i = 0; i < slot->scale_len; i++) {
+        int d = abs(rel - (int)slot->scale_degrees[i]);
+        int d_wrap = 12 - d;
+        if (d < best_dist) { best_dist = d; best = slot->scale_degrees[i]; }
+        if (d_wrap < best_dist) { best_dist = d_wrap; best = slot->scale_degrees[i]; }
+    }
+    int octave_offset = (int)note - root;
+    int octave = octave_offset / 12;
+    if (octave_offset < 0 && (octave_offset % 12) != 0) octave--;
+    int result = root + octave * 12 + best;
+    if (result < 0) result = 0;
+    if (result > 127) result = 127;
+    return (uint8_t)result;
+}
+
+/* Note tracking — record what was actually sent for each input note */
+static inline int held_note_find(RackSlot *slot, uint8_t input) {
+    for (int i = 0; i < MAX_HELD_NOTES; i++)
+        if (slot->held_notes[i].active && slot->held_notes[i].input == input)
+            return i;
+    return -1;
+}
+
+static inline int held_note_alloc(RackSlot *slot) {
+    for (int i = 0; i < MAX_HELD_NOTES; i++)
+        if (!slot->held_notes[i].active) return i;
+    /* Steal oldest (slot 0) — force release first */
+    return 0;
+}
+
+static void (*g_midi_broadcast)(int ch, int note, int vel, int is_on) = NULL;
+
+static inline void held_note_release(RackSlot *slot, int idx, InstrumentType *itype, void *st, int ch) {
+    if (!slot->held_notes[idx].active) return;
+    for (int j = 0; j < slot->held_notes[idx].sent_count; j++) {
+        uint8_t n = slot->held_notes[idx].sent[j];
+        itype->midi(st, (uint8_t)(0x80 | ch), n, 0);
+    }
+    if (g_midi_broadcast)
+        g_midi_broadcast(ch, slot->held_notes[idx].input, 0, 0);
+    slot->held_notes[idx].active = 0;
+    slot->held_notes[idx].sent_count = 0;
+}
+
+/* ── Scale/chord-aware MIDI shim for keyseq/seq ──────────────────── */
+
+/* Wrapper that keyseq fires through — applies scale quantize + chord fan-out */
+static void scale_chord_midi_shim(void *inst_state, uint8_t status, uint8_t d1, uint8_t d2) {
+    /* Find which slot this belongs to */
+    RackSlot *slot = NULL;
+    int ch = status & 0x0F;
+    if (ch < MAX_SLOTS && g_rack.slots[ch].state == inst_state)
+        slot = &g_rack.slots[ch];
+
+    /* No slot found — scan all slots */
+    if (!slot) {
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            if (g_rack.slots[i].state == inst_state && g_rack.slots[i].type_idx >= 0) {
+                slot = &g_rack.slots[i];
+                ch = i;
+                break;
+            }
+        }
+    }
+
+    /* No scale/chord active — pass through directly */
+    if (!slot || slot->type_idx < 0 ||
+        (slot->scale_len <= 0 && slot->chord_len <= 0)) {
+        if (slot && slot->type_idx >= 0)
+            g_type_registry[slot->type_idx]->midi(inst_state, status, d1, d2);
+        return;
+    }
+
+    InstrumentType *itype = g_type_registry[slot->type_idx];
+    uint8_t type = status & 0xF0;
+
+    if (type == 0x90 && d2 > 0) {
+        /* Note-on: quantize, chord expand, track */
+        uint8_t base = scale_quantize(slot, d1);
+        int hi = held_note_alloc(slot);
+        if (slot->held_notes[hi].active)
+            held_note_release(slot, hi, itype, inst_state, ch);
+        slot->held_notes[hi].input = d1;
+        slot->held_notes[hi].active = 1;
+        slot->held_notes[hi].sent_count = 0;
+
+        if (slot->chord_len > 0) {
+            for (int ci = 0; ci < slot->chord_len; ci++) {
+                uint8_t cn = base + slot->chord_intervals[ci];
+                if (cn > 127) continue;
+                slot->held_notes[hi].sent[slot->held_notes[hi].sent_count++] = cn;
+                itype->midi(inst_state, status, cn, d2);
+            }
+        } else {
+            slot->held_notes[hi].sent[0] = base;
+            slot->held_notes[hi].sent_count = 1;
+            itype->midi(inst_state, status, base, d2);
+        }
+    } else if (type == 0x80 || (type == 0x90 && d2 == 0)) {
+        /* Note-off: release all tracked notes for this input */
+        int idx = held_note_find(slot, d1);
+        if (idx >= 0) {
+            held_note_release(slot, idx, itype, inst_state, ch);
+        } else {
+            /* Not tracked — pass through raw (safety) */
+            itype->midi(inst_state, status, d1, d2);
+        }
+    } else {
+        /* Non-note messages pass through */
+        itype->midi(inst_state, status, d1, d2);
+    }
+}
+
 /* ── MIDI dispatch (raw bytes → rack) ──────────────────────────────── */
 
 /* Optional callback for broadcasting MIDI events (set by server after init) */
-static void (*g_midi_broadcast)(int ch, int note, int vel, int is_on) = NULL;
 
 static inline void midi_dispatch_raw(const uint8_t *data, int len) {
     if (len < 1) return;
@@ -901,28 +1062,92 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
 
     switch (type) {
     case 0x90:
-        if (d2 > 0 && slot->mono) {
-            /* mono: kill previous note before playing new one */
-            if (slot->last_note >= 0 && slot->last_note != d1)
+        if (d2 > 0 && slot->scale_program) {
+            /* Scale programming: first note = root, rest = intervals */
+            if (slot->scale_root < 0) {
+                slot->scale_root = d1;
+                slot->scale_degrees[0] = 0;
+                slot->scale_len = 1;
+            } else {
+                int interval = ((int)d1 - slot->scale_root) % 12;
+                if (interval < 0) interval += 12;
+                int dup = 0;
+                for (int i = 0; i < slot->scale_len; i++)
+                    if (slot->scale_degrees[i] == (uint8_t)interval) { dup = 1; break; }
+                if (!dup && slot->scale_len < MAX_SCALE_DEGREES)
+                    slot->scale_degrees[slot->scale_len++] = (uint8_t)interval;
+            }
+            fprintf(stderr, "[scale] ch%d root=%d degrees=%d\n", ch, slot->scale_root, slot->scale_len);
+            state_mark_dirty();
+            sse_mark_dirty();
+            slot_read_end();
+            return;
+        }
+        if (d2 > 0 && (slot->scale_len > 0 || slot->chord_len > 0)) {
+            /* Note-on with scale/chord: quantize, expand, track */
+            uint8_t base = scale_quantize(slot, d1);
+
+            if (slot->mono && slot->last_note >= 0 && slot->last_note != d1) {
+                int prev = held_note_find(slot, (uint8_t)slot->last_note);
+                if (prev >= 0) held_note_release(slot, prev, itype, st, ch);
+                else itype->midi(st, (uint8_t)(0x80 | ch), (uint8_t)slot->last_note, 0);
+            }
+            if (slot->legato && slot->last_note >= 0) {
+                slot->glide_from = 440.0f * powf(2.0f, (float)(slot->last_note - 69) / 12.0f);
+                slot->glide_to   = 440.0f * powf(2.0f, (float)(base - 69) / 12.0f);
+                slot->glide_pos  = 0.0f;
+            }
+            slot->last_note = d1;
+
+            int hi = held_note_alloc(slot);
+            if (slot->held_notes[hi].active)
+                held_note_release(slot, hi, itype, st, ch);
+            slot->held_notes[hi].input = d1;
+            slot->held_notes[hi].active = 1;
+            slot->held_notes[hi].sent_count = 0;
+
+            if (slot->chord_len > 0) {
+                for (int ci = 0; ci < slot->chord_len; ci++) {
+                    uint8_t cn = base + slot->chord_intervals[ci];
+                    if (cn > 127) continue;
+                    slot->held_notes[hi].sent[slot->held_notes[hi].sent_count++] = cn;
+                    itype->midi(st, status, cn, d2);
+                }
+            } else {
+                slot->held_notes[hi].sent[0] = base;
+                slot->held_notes[hi].sent_count = 1;
+                itype->midi(st, status, base, d2);
+            }
+            if (g_midi_broadcast) g_midi_broadcast(ch, d1, d2, 1);
+        } else if (d2 > 0) {
+            /* Normal note-on — no scale/chord, original path */
+            if (slot->mono && slot->last_note >= 0 && slot->last_note != d1)
                 itype->midi(st, (uint8_t)(0x80 | (status & 0x0F)),
                             (uint8_t)slot->last_note, 0);
+            if (slot->legato && slot->last_note >= 0) {
+                slot->glide_from = 440.0f * powf(2.0f, (float)(slot->last_note - 69) / 12.0f);
+                slot->glide_to   = 440.0f * powf(2.0f, (float)(d1 - 69) / 12.0f);
+                slot->glide_pos  = 0.0f;
+            }
+            slot->last_note = d1;
+            itype->midi(st, status, d1, d2);
+            if (g_midi_broadcast) g_midi_broadcast(ch, d1, d2, 1);
+        } else {
+            /* vel=0 note-on = note-off */
+            if (slot->mono) slot->last_note = -1;
+            int idx = held_note_find(slot, d1);
+            if (idx >= 0) held_note_release(slot, idx, itype, st, ch);
+            else itype->midi(st, status, d1, d2);
         }
-        if (d2 > 0 && slot->legato && slot->last_note >= 0) {
-            /* legato: set up portamento glide */
-            slot->glide_from = 440.0f * powf(2.0f, (float)(slot->last_note - 69) / 12.0f);
-            slot->glide_to   = 440.0f * powf(2.0f, (float)(d1 - 69) / 12.0f);
-            slot->glide_pos  = 0.0f;
-        }
-        if (d2 > 0) slot->last_note = d1;
-        else if (slot->mono) slot->last_note = -1;
-        itype->midi(st, status, d1, d2);
-        if (g_midi_broadcast) g_midi_broadcast(ch, d1, d2, d2 > 0 ? 1 : 0);
         atomic_store(&g_sse_detail_dirty, 1);
         break;
     case 0x80:
         if (slot->mono && d1 == slot->last_note) slot->last_note = -1;
-        itype->midi(st, status, d1, d2);
-        if (g_midi_broadcast) g_midi_broadcast(ch, d1, 0, 0);
+        {
+            int idx = held_note_find(slot, d1);
+            if (idx >= 0) held_note_release(slot, idx, itype, st, ch);
+            else itype->midi(st, status, d1, d2);
+        }
         atomic_store(&g_sse_detail_dirty, 1);
         break;
     case 0xE0: {
@@ -936,6 +1161,20 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
         /* CC1 = mod wheel → vibrato LFO depth */
         if (d1 == 1) {
             slot->mod_wheel = (float)d2 / 127.0f;
+        }
+        /* CC82 = toggle scale programming mode */
+        if (d1 == 82 && d2 == 127) {
+            slot->scale_program = !slot->scale_program;
+            if (slot->scale_program) {
+                slot->scale_root = -1;
+                slot->scale_len = 0;
+            }
+            fprintf(stderr, "[scale] ch%d program mode: %s\n", ch,
+                    slot->scale_program ? "ON" : "OFF");
+            state_mark_dirty();
+            sse_mark_dirty();
+            slot_read_end();
+            return;
         }
         /* CC80/81 = user preset down/up */
         if (d1 == 80 && d2 == 127) {
@@ -974,17 +1213,19 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
 
     memset(mix_buf, 0, sizeof(float) * (size_t)(frames * CHANNELS));
 
+    /* Snapshot slot active state — avoid atomic loads in inner loop */
+    int slot_active[MAX_SLOTS];
     int any_solo = 0;
     for (int i = 0; i < MAX_SLOTS; i++) {
-        if (atomic_load(&g_rack.slots[i].active) && g_rack.slots[i].solo) {
-            any_solo = 1;
-            break;
-        }
+        slot_active[i] = atomic_load(&g_rack.slots[i].active);
+        if (slot_active[i] && g_rack.slots[i].solo) any_solo = 1;
     }
 
+    float buffer_dt = (float)frames / (float)sample_rate;
+
     for (int i = 0; i < MAX_SLOTS; i++) {
+        if (!slot_active[i]) continue;
         RackSlot *slot = &g_rack.slots[i];
-        if (!atomic_load(&slot->active)) continue;
         void *st = slot->state;
         if (!st) continue;
         if (slot->mute) continue;
@@ -996,24 +1237,17 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
         MiniSeq *s_seq = slot->seq;
         KeySeq  *s_ks  = slot->keyseq;
 
-        /* Tick slot-level seq/keyseq per-sample before rendering.
-         * Events fire at buffer boundaries (acceptable latency). */
-        float tick_dt = 1.0f / (float)sample_rate;
-        for (int si = 0; si < frames; si++) {
-            if (s_seq) seq_tick(s_seq, tick_dt);
-            if (s_ks)  keyseq_tick(s_ks, tick_dt);
-        }
+        /* Tick seq/keyseq once per buffer (not per sample) */
+        if (s_seq) seq_tick(s_seq, buffer_dt);
+        if (s_ks)  keyseq_tick(s_ks, buffer_dt);
 
         /* Legato portamento glide → cents_mod */
         if (slot->legato && slot->glide_pos < 1.0f && slot->glide_to > 0.01f) {
-            float glide_dt = (float)frames / (float)sample_rate;
-            slot->glide_pos += glide_dt * slot->glide_rate;
+            slot->glide_pos += buffer_dt * slot->glide_rate;
             if (slot->glide_pos > 1.0f) slot->glide_pos = 1.0f;
-            /* smoothstep for tasty curve */
             float t = slot->glide_pos;
             t = t * t * (3.0f - 2.0f * t);
             float freq = slot->glide_from + (slot->glide_to - slot->glide_from) * t;
-            /* convert freq offset to cents relative to glide_to */
             float cents = 1200.0f * log2f(freq / slot->glide_to);
             slot->cents_mod += cents;
         }
@@ -1025,28 +1259,27 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
 
         /* Mod wheel → vibrato LFO (5.5 Hz sine, depth scaled by mod_wheel) */
         if (slot->mod_wheel > 0.001f) {
-            float vib_rate = 5.5f; /* Hz */
-            float vib_depth = slot->mod_wheel * 50.0f; /* max ±50 cents */
-            float dt_total = (float)frames / (float)sample_rate;
-            slot->vibrato_phase += vib_rate * dt_total * 6.2831853f;
+            slot->vibrato_phase += 5.5f * buffer_dt * 6.2831853f;
             if (slot->vibrato_phase > 6.2831853f)
                 slot->vibrato_phase -= 6.2831853f;
-            slot->cents_mod += sinf(slot->vibrato_phase) * vib_depth;
+            slot->cents_mod += sinf(slot->vibrato_phase) * slot->mod_wheel * 50.0f;
         }
 
-        /* Copy keyseq cents_mod to slot, then slot cents_mod to instrument */
+        /* Copy keyseq cents_mod to slot, then to instrument via type_idx */
         if (s_ks) slot->cents_mod += s_ks->cents_mod;
         {
             float cm = slot->cents_mod;
-            if (strcmp(itype->name, "fm-synth") == 0) ((FMSynth *)st)->cents_mod = cm;
-            else if (strcmp(itype->name, "sub-synth") == 0) ((SubSynth *)st)->cents_mod = cm;
-            else if (strcmp(itype->name, "ym2413") == 0) ((YM2413State *)st)->cents_mod = cm;
-            else if (strcmp(itype->name, "fm-drums") == 0) ((FMDrumState *)st)->cents_mod = cm;
-            else if (strcmp(itype->name, "additive") == 0) ((AdditiveState *)st)->cents_mod = cm;
-            else if (strcmp(itype->name, "phase-dist") == 0) ((PhaseDistState *)st)->cents_mod = cm;
-            else if (strcmp(itype->name, "bird") == 0) ((BirdState *)st)->cents_mod = cm;
+            switch (slot->type_idx) {
+            case 0: ((FMSynth *)st)->cents_mod = cm; break;
+            case 1: ((YM2413State *)st)->cents_mod = cm; break;
+            case 2: ((SubSynth *)st)->cents_mod = cm; break;
+            case 3: ((FMDrumState *)st)->cents_mod = cm; break;
+            case 4: ((AdditiveState *)st)->cents_mod = cm; break;
+            case 5: ((PhaseDistState *)st)->cents_mod = cm; break;
+            case 6: ((BirdState *)st)->cents_mod = cm; break;
+            }
         }
-        slot->cents_mod = 0; /* reset for next frame */
+        slot->cents_mod = 0;
 
         memset(slot_buf, 0, sizeof(float) * (size_t)(frames * CHANNELS));
         itype->render(st, slot_buf, frames, sample_rate);

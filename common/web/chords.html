@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0d0d0d">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<title>miniwave — chords</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+:root {
+  --bg: #0d0d0d; --panel: #1a1a2e; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #e0e0e0; --dim: #666; --border: #2a2a4a;
+  --hw-shadow: rgba(255,255,255,0.18) 0 1px 1px 0 inset, rgba(0,0,0,0.7) 0 -1px 1px 0 inset, rgba(0,0,0,0.25) 0 1px 2px 0, rgba(0,0,0,0.22) 0 3px 4px -1px, rgba(0,0,0,0.18) 0 6px 8px -2px;
+  --hw-shadow-sm: rgba(255,255,255,0.15) 0 1px 0 0 inset, rgba(0,0,0,0.6) 0 -1px 0 0 inset, rgba(0,0,0,0.3) 0 1px 2px 0;
+  --hw-pressed: rgba(0,0,0,0.85) 0 1px 5px 0 inset;
+}
+html, body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; height: 100%; overflow: hidden; }
+
+#page { display: flex; flex-direction: column; height: 100%; padding: 16px 20px; gap: 12px; }
+#header { flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
+#header h1 { color: var(--accent); font-size: 16px; white-space: nowrap; }
+#header h1 a { text-decoration: none; }
+
+.ch-nav { display: flex; align-items: center; gap: 2px; }
+.ch-nav button { width: 24px; height: 24px; padding: 0; font-size: 13px; line-height: 24px; text-align: center; border-radius: 5px; background: var(--card); border: none; color: var(--dim); cursor: pointer; box-shadow: var(--hw-shadow); transition: all 0.15s; }
+.ch-nav button:hover { color: var(--text); }
+.ch-nav button:active { box-shadow: var(--hw-pressed); }
+.ch-label { font-size: 13px; font-weight: bold; color: var(--text); min-width: 50px; text-align: center; }
+
+.inst-badge { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.status-line { color: var(--dim); font-size: 11px; margin-left: auto; }
+
+#columns { display: flex; gap: 14px; flex: 1; min-height: 0; }
+.col { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-y: auto; }
+
+.section { background: var(--panel); border: none; border-radius: 6px; padding: 12px; flex-shrink: 0; box-shadow: var(--hw-shadow); }
+.section h3 { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+
+/* Piano keys */
+.piano { display: flex; gap: 2px; margin: 8px 0; }
+.key {
+  width: 36px; height: 64px; border-radius: 0 0 4px 4px;
+  border: none; cursor: pointer; font-size: 9px; font-family: inherit;
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px;
+  box-shadow: var(--hw-shadow-sm); transition: all 0.1s;
+}
+.key.white { background: #888; color: #333; }
+.key.black { background: #222; color: #666; height: 44px; width: 28px; margin: 0 -14px; z-index: 1; }
+.key.active { background: var(--good); color: #000; box-shadow: var(--hw-pressed); }
+.key.root { background: var(--accent); color: #fff; box-shadow: var(--hw-pressed); }
+.key:hover { opacity: 0.85; }
+
+/* Chord presets */
+.presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.preset-btn {
+  padding: 5px 10px; font-size: 11px; border-radius: 5px;
+  background: var(--card); border: none; color: var(--text); cursor: pointer;
+  box-shadow: var(--hw-shadow-sm); transition: all 0.15s; white-space: nowrap;
+}
+.preset-btn:hover { color: #fff; }
+.preset-btn:active { box-shadow: var(--hw-pressed); }
+.preset-btn.active { background: var(--accent); color: white; box-shadow: var(--hw-pressed); }
+
+/* Toggle buttons */
+.tog-btn {
+  padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 5px;
+  background: var(--card); border: none; color: var(--dim); cursor: pointer;
+  box-shadow: var(--hw-shadow); transition: all 0.15s;
+}
+.tog-btn:hover { color: var(--text); }
+.tog-btn.on { background: var(--accent); color: white; box-shadow: var(--hw-pressed); }
+
+/* Scale display */
+.scale-display { font-size: 12px; color: var(--text); padding: 4px 0; }
+.scale-display .note { display: inline-block; padding: 2px 6px; margin: 1px; border-radius: 3px; background: var(--card); box-shadow: var(--hw-shadow-sm); }
+.scale-display .note.root { background: var(--accent); color: white; }
+
+/* Intervals display */
+.intervals { font-size: 12px; color: var(--dim); padding: 4px 0; }
+
+@media (max-width: 700px) { #columns { flex-direction: column; } }
+</style>
+</head>
+<body>
+<div id="page">
+
+<div id="header">
+  <h1><a href="/" style="color:var(--accent)">miniwave</a> / <a href="/keyseq" style="color:#8866cc">keyseq</a> / <a href="/effex" style="color:#00d4aa">effex</a> / <span style="color:#ff8800">chords</span> / <a href="/config" style="color:#666">cfg</a> <span id="ver" style="color:var(--dim);font-size:10px;font-weight:normal"></span></h1>
+  <div class="ch-nav">
+    <button id="ch-prev">&lsaquo;</button>
+    <span class="ch-label" id="ch-label">CH 1</span>
+    <button id="ch-next">&rsaquo;</button>
+  </div>
+  <span class="inst-badge" id="inst-badge"></span>
+  <span class="status-line" id="status-line"></span>
+</div>
+
+<div id="columns">
+  <div class="col">
+    <div class="section">
+      <h3>Scale
+        <button class="tog-btn" id="prog-btn" title="Enter scale programming mode">PROGRAM</button>
+        <button class="tog-btn" id="clear-scale-btn" title="Clear scale">CLEAR</button>
+      </h3>
+      <div class="scale-display" id="scale-display">no scale set</div>
+      <div class="piano" id="scale-piano"></div>
+      <div style="color:var(--dim);font-size:10px;margin-top:4px">Click a root note, then click intervals. Or use PROGRAM mode to input from MIDI controller.</div>
+    </div>
+
+    <div class="section">
+      <h3>Scale Presets</h3>
+      <div class="presets" id="scale-presets"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="section">
+      <h3>Chord Shape
+        <button class="tog-btn" id="clear-chord-btn" title="Clear chord">CLEAR</button>
+      </h3>
+      <div class="intervals" id="chord-display">no chord set</div>
+      <div class="piano" id="chord-piano"></div>
+      <div style="color:var(--dim);font-size:10px;margin-top:4px">Click intervals from C to define chord shape. Single key plays all intervals.</div>
+    </div>
+
+    <div class="section">
+      <h3>Chord Presets</h3>
+      <div class="presets" id="chord-presets"></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+'use strict';
+const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const BLACK = [1,3,6,8,10];
+const api = b => fetch('/api', {method:'POST', body:JSON.stringify(b)}).then(r=>r.json());
+
+let activeCh = 0;
+let scaleRoot = -1;
+let scaleDegrees = [];
+let chordIntervals = [];
+let programming = false;
+let rackSlots = [];
+
+/* ── Scale presets ── */
+const SCALE_PRESETS = [
+  {name:'Major',       d:[0,2,4,5,7,9,11]},
+  {name:'Minor',       d:[0,2,3,5,7,8,10]},
+  {name:'Dorian',      d:[0,2,3,5,7,9,10]},
+  {name:'Mixolydian',  d:[0,2,4,5,7,9,10]},
+  {name:'Phrygian',    d:[0,1,3,5,7,8,10]},
+  {name:'Lydian',      d:[0,2,4,6,7,9,11]},
+  {name:'Locrian',     d:[0,1,3,5,6,8,10]},
+  {name:'Harm Minor',  d:[0,2,3,5,7,8,11]},
+  {name:'Mel Minor',   d:[0,2,3,5,7,9,11]},
+  {name:'Pentatonic',  d:[0,2,4,7,9]},
+  {name:'Min Penta',   d:[0,3,5,7,10]},
+  {name:'Blues',        d:[0,3,5,6,7,10]},
+  {name:'Whole Tone',  d:[0,2,4,6,8,10]},
+  {name:'Chromatic',   d:[0,1,2,3,4,5,6,7,8,9,10,11]},
+];
+
+/* ── Chord presets ── */
+const CHORD_PRESETS = [
+  {name:'Maj',   i:[0,4,7]},
+  {name:'Min',   i:[0,3,7]},
+  {name:'7th',   i:[0,4,7,10]},
+  {name:'Maj7',  i:[0,4,7,11]},
+  {name:'m7',    i:[0,3,7,10]},
+  {name:'Dim',   i:[0,3,6]},
+  {name:'Aug',   i:[0,4,8]},
+  {name:'Sus2',  i:[0,2,7]},
+  {name:'Sus4',  i:[0,5,7]},
+  {name:'5th',   i:[0,7]},
+  {name:'Oct',   i:[0,12]},
+  {name:'Add9',  i:[0,4,7,14]},
+  {name:'m9',    i:[0,3,7,10,14]},
+  {name:'6th',   i:[0,4,7,9]},
+  {name:'m6',    i:[0,3,7,9]},
+];
+
+/* ── Piano rendering ── */
+function buildPiano(container, selected, rootNote, onClick) {
+  container.innerHTML = '';
+  for (let n = 0; n < 12; n++) {
+    const btn = document.createElement('button');
+    const isBlack = BLACK.includes(n);
+    const isActive = selected.includes(n);
+    const isRoot = (n === rootNote);
+    btn.className = 'key ' + (isBlack ? 'black' : 'white') + (isRoot ? ' root' : isActive ? ' active' : '');
+    btn.textContent = NOTES[n];
+    btn.onclick = () => onClick(n);
+    container.appendChild(btn);
+  }
+}
+
+/* ── Scale piano ── */
+function renderScalePiano() {
+  buildPiano(document.getElementById('scale-piano'), scaleDegrees, scaleDegrees.length > 0 ? 0 : -1, n => {
+    if (scaleRoot < 0) {
+      /* First click = set root (use middle C + offset) */
+      scaleRoot = 60 + n;
+      scaleDegrees = [0];
+    } else {
+      const deg = n;
+      const idx = scaleDegrees.indexOf(deg);
+      if (idx >= 0 && deg !== 0) scaleDegrees.splice(idx, 1);
+      else if (idx < 0) scaleDegrees.push(deg);
+      scaleDegrees.sort((a,b) => a-b);
+    }
+    pushScale();
+    renderAll();
+  });
+}
+
+/* ── Chord piano ── */
+function renderChordPiano() {
+  buildPiano(document.getElementById('chord-piano'), chordIntervals, -1, n => {
+    const idx = chordIntervals.indexOf(n);
+    if (idx >= 0) chordIntervals.splice(idx, 1);
+    else if (chordIntervals.length < 8) chordIntervals.push(n);
+    chordIntervals.sort((a,b) => a-b);
+    pushChord();
+    renderAll();
+  });
+}
+
+/* ── Display ── */
+function renderScaleDisplay() {
+  const el = document.getElementById('scale-display');
+  if (scaleRoot < 0 || scaleDegrees.length === 0) {
+    el.textContent = 'no scale set';
+    return;
+  }
+  const rootName = NOTES[scaleRoot % 12];
+  el.innerHTML = scaleDegrees.map((d, i) =>
+    '<span class="note' + (i === 0 ? ' root' : '') + '">' + NOTES[(scaleRoot + d) % 12] + '</span>'
+  ).join(' ');
+}
+
+function renderChordDisplay() {
+  const el = document.getElementById('chord-display');
+  if (chordIntervals.length === 0) {
+    el.textContent = 'no chord set';
+    return;
+  }
+  el.textContent = 'intervals: [' + chordIntervals.join(', ') + '] — ' +
+    chordIntervals.map(i => NOTES[i % 12]).join(' ');
+}
+
+function renderStatusLine() {
+  const parts = [];
+  if (scaleRoot >= 0) parts.push('root: ' + NOTES[scaleRoot % 12] + (Math.floor(scaleRoot / 12) - 1));
+  if (scaleDegrees.length > 0) parts.push('scale: ' + scaleDegrees.length + ' notes');
+  if (chordIntervals.length > 0) parts.push('chord: ' + chordIntervals.length + ' notes');
+  if (programming) parts.push('PROGRAMMING');
+  document.getElementById('status-line').textContent = parts.join(' | ');
+}
+
+function renderAll() {
+  renderScalePiano();
+  renderChordPiano();
+  renderScaleDisplay();
+  renderChordDisplay();
+  renderStatusLine();
+  const progBtn = document.getElementById('prog-btn');
+  progBtn.classList.toggle('on', programming);
+  progBtn.textContent = programming ? 'STOP' : 'PROGRAM';
+}
+
+/* ── Presets ── */
+function renderScalePresets() {
+  const el = document.getElementById('scale-presets');
+  el.innerHTML = '';
+  SCALE_PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.textContent = p.name;
+    btn.onclick = () => {
+      if (scaleRoot < 0) scaleRoot = 60; /* default to C4 */
+      scaleDegrees = [...p.d];
+      pushScale();
+      renderAll();
+    };
+    el.appendChild(btn);
+  });
+}
+
+function renderChordPresets() {
+  const el = document.getElementById('chord-presets');
+  el.innerHTML = '';
+  CHORD_PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.textContent = p.name;
+    btn.onclick = () => {
+      chordIntervals = [...p.i];
+      pushChord();
+      renderAll();
+    };
+    el.appendChild(btn);
+  });
+}
+
+/* ── API ── */
+function pushScale() {
+  api({type:'set_scale', channel:activeCh, root:scaleRoot, degrees:scaleDegrees});
+}
+function pushChord() {
+  api({type:'set_chord', channel:activeCh, intervals:chordIntervals});
+}
+
+/* ── Channel nav ── */
+function setCh(ch) {
+  if (ch < 0) ch = 15;
+  if (ch > 15) ch = 0;
+  activeCh = ch;
+  document.getElementById('ch-label').textContent = 'CH ' + (ch + 1);
+  api({type:'focus_ch', channel:ch});
+  /* ch_status SSE will update scale/chord state */
+}
+
+document.getElementById('ch-prev').onclick = () => setCh(activeCh - 1);
+document.getElementById('ch-next').onclick = () => setCh(activeCh + 1);
+
+/* ── Buttons ── */
+document.getElementById('prog-btn').onclick = () => {
+  programming = !programming;
+  api({type:'scale_program', channel:activeCh, value:programming ? 1 : 0});
+  if (programming) { scaleRoot = -1; scaleDegrees = []; }
+  renderAll();
+};
+
+document.getElementById('clear-scale-btn').onclick = () => {
+  scaleRoot = -1;
+  scaleDegrees = [];
+  programming = false;
+  api({type:'set_scale', channel:activeCh, root:-1, degrees:[]});
+  api({type:'scale_program', channel:activeCh, value:0});
+  renderAll();
+};
+
+document.getElementById('clear-chord-btn').onclick = () => {
+  chordIntervals = [];
+  api({type:'set_chord', channel:activeCh, intervals:[]});
+  renderAll();
+};
+
+/* ── SSE ── */
+const es = new EventSource('/events');
+
+es.addEventListener('rack_status', e => {
+  const d = JSON.parse(e.data);
+  rackSlots = d.slots || [];
+  const v = document.getElementById('ver');
+  if (v && d.version) v.textContent = 'v' + d.version;
+  /* Follow focused_ch */
+  if (typeof d.focused_ch === 'number' && d.focused_ch !== activeCh) {
+    activeCh = d.focused_ch;
+    document.getElementById('ch-label').textContent = 'CH ' + (activeCh + 1);
+  }
+  const slot = rackSlots[activeCh];
+  document.getElementById('inst-badge').textContent = slot && slot.active ? slot.type : '';
+});
+
+es.addEventListener('ch_status', e => {
+  const d = JSON.parse(e.data);
+  if (d.channel !== activeCh) return;
+  /* Sync scale from server */
+  scaleRoot = (typeof d.scale_root === 'number') ? d.scale_root : -1;
+  scaleDegrees = Array.isArray(d.scale) ? [...d.scale] : [];
+  programming = !!d.scale_program;
+  /* Sync chord from server */
+  chordIntervals = Array.isArray(d.chord) ? [...d.chord] : [];
+  renderAll();
+});
+
+/* ── Init ── */
+renderScalePresets();
+renderChordPresets();
+renderAll();
+
+/* Request ch_status for current channel */
+api({type:'ch_status', channel:activeCh});
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+</script>
+</body>
+</html>

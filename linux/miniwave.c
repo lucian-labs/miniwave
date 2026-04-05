@@ -24,6 +24,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
+#include <sched.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -351,62 +352,61 @@ static inline void seq_dispatch(snd_seq_event_t *ev) {
         }
     }
 
-    RackSlot *slot = &g_rack.slots[ch];
-    if (!slot->active || !slot->state) return;
-    InstrumentType *itype = g_type_registry[slot->type_idx];
+    /* Convert ALSA seq event to raw MIDI bytes and route through
+     * midi_dispatch_raw — single path for keyseq, scale/chord,
+     * note tracking, and SSE broadcast */
+    uint8_t msg[3];
+    int len = 0;
 
     switch (ev->type) {
     case SND_SEQ_EVENT_NOTEON:
-        itype->midi(slot->state,
-                    (uint8_t)(0x90 | ch),
-                    (uint8_t)ev->data.note.note,
-                    (uint8_t)ev->data.note.velocity);
+        msg[0] = (uint8_t)(0x90 | ch);
+        msg[1] = (uint8_t)ev->data.note.note;
+        msg[2] = (uint8_t)ev->data.note.velocity;
+        len = 3;
         break;
     case SND_SEQ_EVENT_NOTEOFF:
-        itype->midi(slot->state,
-                    (uint8_t)(0x80 | ch),
-                    (uint8_t)ev->data.note.note,
-                    0);
+        msg[0] = (uint8_t)(0x80 | ch);
+        msg[1] = (uint8_t)ev->data.note.note;
+        msg[2] = 0;
+        len = 3;
         break;
     case SND_SEQ_EVENT_CONTROLLER:
-        /* CC1 = mod wheel → slot vibrato depth */
-        if (ev->data.control.param == 1) {
-            slot->mod_wheel = (float)ev->data.control.value / 127.0f;
-        }
-        itype->midi(slot->state,
-                    (uint8_t)(0xB0 | ch),
-                    (uint8_t)ev->data.control.param,
-                    (uint8_t)ev->data.control.value);
-        /* Push UI update for macro knob CCs */
-        if (ev->data.control.param >= 14 && ev->data.control.param <= 21)
-            midi_push_ch_status(ch);
+        msg[0] = (uint8_t)(0xB0 | ch);
+        msg[1] = (uint8_t)ev->data.control.param;
+        msg[2] = (uint8_t)ev->data.control.value;
+        len = 3;
         break;
     case SND_SEQ_EVENT_PGMCHANGE:
-        itype->midi(slot->state,
-                    (uint8_t)(0xC0 | ch),
-                    (uint8_t)ev->data.control.value,
-                    0);
+        msg[0] = (uint8_t)(0xC0 | ch);
+        msg[1] = (uint8_t)ev->data.control.value;
+        len = 2;
         break;
     case SND_SEQ_EVENT_PITCHBEND: {
         int val = ev->data.control.value + 8192;
         if (val < 0) val = 0;
         if (val > 16383) val = 16383;
-        /* Set slot pitch bend for rack-level processing */
-        slot->pitch_bend = (float)(val - 8192) / 8192.0f;
-        itype->midi(slot->state,
-                    (uint8_t)(0xE0 | ch),
-                    (uint8_t)(val & 0x7F),
-                    (uint8_t)((val >> 7) & 0x7F));
+        msg[0] = (uint8_t)(0xE0 | ch);
+        msg[1] = (uint8_t)(val & 0x7F);
+        msg[2] = (uint8_t)((val >> 7) & 0x7F);
+        len = 3;
         break;
     }
     case SND_SEQ_EVENT_CHANPRESS:
-        itype->midi(slot->state,
-                    (uint8_t)(0xD0 | ch),
-                    (uint8_t)ev->data.control.value,
-                    0);
+        msg[0] = (uint8_t)(0xD0 | ch);
+        msg[1] = (uint8_t)ev->data.control.value;
+        len = 2;
         break;
     default:
-        break;
+        return;
+    }
+
+    if (len > 0) {
+        midi_dispatch_raw(msg, len);
+        /* Push UI update for macro knob CCs */
+        if (ev->type == SND_SEQ_EVENT_CONTROLLER &&
+            ev->data.control.param >= 14 && ev->data.control.param <= 21)
+            midi_push_ch_status(ch);
     }
 }
 
@@ -481,6 +481,8 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, sighandler);
     signal(SIGTERM, sighandler);
     signal(SIGPIPE, SIG_IGN);  /* ignore broken pipe from dead SSE clients */
+    signal(SIGINT, sighandler);
+    signal(SIGTERM, sighandler);
 
     char midi_dev[64] = "";
     char audio_dev[64] = "default";
@@ -542,7 +544,23 @@ int main(int argc, char *argv[]) {
             if (midi_dev[0] != '\0') {
                 platform_midi_connect(midi_dev);
             } else {
-                fprintf(stderr, "[miniwave] MIDI: ready (use -m client:port or OSC /midi/device)\n");
+                /* Auto-detect: scan for known MIDI devices */
+                char devs[16][64];
+                char devnames[16][128];
+                int ndevs = platform_midi_list_devices(devs, devnames, 16);
+                int found = 0;
+                for (int i = 0; i < ndevs; i++) {
+                    if (strstr(devnames[i], "MPK mini") ||
+                        strstr(devnames[i], "MiniLab") ||
+                        strstr(devnames[i], "Kontrol")) {
+                        fprintf(stderr, "[miniwave] MIDI auto-detect: %s (%s)\n", devnames[i], devs[i]);
+                        platform_midi_connect(devs[i]);
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found)
+                    fprintf(stderr, "[miniwave] MIDI: no known device found (use -m or /midi/device)\n");
             }
         }
     }
@@ -589,7 +607,7 @@ int main(int argc, char *argv[]) {
         snd_pcm_hw_params_set_channels(pcm, hw, CHANNELS);
         snd_pcm_uframes_t ps = (snd_pcm_uframes_t)period_size;
         snd_pcm_hw_params_set_period_size_near(pcm, hw, &ps, NULL);
-        snd_pcm_uframes_t bs = ps * 2;
+        snd_pcm_uframes_t bs = ps * 4;  /* 4 periods — headroom for scheduling jitter */
         snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &bs);
 
         err = snd_pcm_hw_params(pcm, hw);
@@ -773,7 +791,19 @@ int main(int argc, char *argv[]) {
             usleep(50000);
         }
     } else {
+        /* Try realtime scheduling for audio thread */
+        struct sched_param sp = { .sched_priority = 50 };
+        if (sched_setscheduler(0, SCHED_FIFO, &sp) == 0)
+            fprintf(stderr, "[miniwave] audio thread: SCHED_FIFO priority 50\n");
+        else
+            fprintf(stderr, "[miniwave] audio thread: normal priority (run as root for RT)\n");
+
+        struct timespec t0, t1;
+        float period_us = (float)period_size / (float)SAMPLE_RATE * 1000000.0f;
+
         while (!g_quit) {
+            clock_gettime(CLOCK_MONOTONIC, &t0);
+
             render_mix(mix_buf, slot_buf, period_size, SAMPLE_RATE);
 
             if (bus && bus_slot >= 0) {
@@ -790,6 +820,11 @@ int main(int argc, char *argv[]) {
                     audio_buf[j] = (int16_t)(s * 32000.0f);
                 }
             }
+
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            float render_us = (float)(t1.tv_sec - t0.tv_sec) * 1000000.0f
+                            + (float)(t1.tv_nsec - t0.tv_nsec) / 1000.0f;
+            g_cpu_load = g_cpu_load * 0.95f + (render_us / period_us) * 0.05f;
 
             snd_pcm_sframes_t frames = snd_pcm_writei(pcm, audio_buf, (snd_pcm_uframes_t)period_size);
             if (frames < 0) {

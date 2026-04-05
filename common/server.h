@@ -104,7 +104,8 @@ static int build_rack_status_json(char *buf, int max) {
         "\"osc_port\":%d,\"mcast_active\":%d,\"mcast_group\":\"%s:%d\","
         "\"bus_active\":%d,\"bus_slot\":%d,"
         "\"sse_clients\":%d,\"bpm\":%.1f,"
-        "\"period_size\":%d,\"sample_rate\":%d,\"audio_device\":\"%s\",\"cpu_load\":%.3f,\"version\":\"%s\"}",
+        "\"period_size\":%d,\"sample_rate\":%d,\"audio_device\":\"%s\",\"cpu_load\":%.3f,\"version\":\"%s\","
+        "\"focused_ch\":%d}",
         (double)g_rack.master_volume, esc_midi,
         g_use_jack ? "JACK" : platform_audio_fallback_name(),
         g_rack.local_mute,
@@ -112,7 +113,8 @@ static int build_rack_status_json(char *buf, int max) {
         MCAST_GROUP, DEFAULT_MCAST_PORT,
         g_bus_active, g_bus_slot,
         sse_count, (double)g_bpm,
-        g_period_size, g_actual_srate, g_audio_device, (double)g_cpu_load, MINIWAVE_VERSION);
+        g_period_size, g_actual_srate, g_audio_device, (double)g_cpu_load, MINIWAVE_VERSION,
+        g_rack.focused_ch);
 
     return pos;
 }
@@ -202,6 +204,19 @@ static int build_ch_status_json(int ch, char *buf, int max) {
         len += snprintf(buf + len, (size_t)(max - len),
             ",\"user_preset\":%d,\"user_preset_name\":\"%s\",\"num_user_presets\":%d",
             slot->current_user_preset, pname, slot->num_user_presets);
+
+        /* Scale + chord */
+        len += snprintf(buf + len, (size_t)(max - len),
+            ",\"scale_root\":%d,\"scale_program\":%d,\"scale\":[",
+            slot->scale_root, slot->scale_program);
+        for (int s = 0; s < slot->scale_len; s++)
+            len += snprintf(buf + len, (size_t)(max - len),
+                "%s%d", s ? "," : "", slot->scale_degrees[s]);
+        len += snprintf(buf + len, (size_t)(max - len), "],\"chord\":[");
+        for (int c = 0; c < slot->chord_len; c++)
+            len += snprintf(buf + len, (size_t)(max - len),
+                "%s%d", c ? "," : "", slot->chord_intervals[c]);
+        len += snprintf(buf + len, (size_t)(max - len), "]");
 
         if (len < max - 1) buf[len++] = '}';
         buf[len] = '\0';
@@ -661,6 +676,18 @@ static void http_handle_api(int fd, const char *body) {
             rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
         }
     }
+    else if (strcmp(type_str, "midi_raw") == 0) {
+        /* Raw MIDI bytes from Web MIDI: {type:"midi_raw", data:[status, d1, d2]} */
+        int data[3] = {0, 0, 0};
+        int n = json_get_iarray(body, "data", data, 3);
+        if (n >= 2) {
+            uint8_t msg[3] = { (uint8_t)data[0], (uint8_t)data[1], (uint8_t)(n >= 3 ? data[2] : 0) };
+            midi_dispatch_raw(msg, n);
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"need data[]\"}");
+        }
+    }
     else if (strcmp(type_str, "midi_device") == 0) {
         char dev[64] = "";
         json_get_string(body, "value", dev, sizeof(dev));
@@ -744,6 +771,7 @@ static void http_handle_api(int fd, const char *body) {
             if (slot->keyseq) {
                 slot->keyseq->enabled = en ? 1 : 0;
                 if (!en) keyseq_stop(slot->keyseq);
+                state_mark_dirty();
                 sse_mark_dirty();
             }
         }
@@ -848,6 +876,75 @@ static void http_handle_api(int fd, const char *body) {
                 sse_mark_dirty();
                 rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
             }
+        }
+    }
+    else if (strcmp(type_str, "set_scale") == 0) {
+        int ch = -1;
+        json_get_int(body, "channel", &ch);
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            int root = -1;
+            json_get_int(body, "root", &root);
+            slot->scale_root = root;
+            int degrees[MAX_SCALE_DEGREES];
+            int n = json_get_iarray(body, "degrees", degrees, MAX_SCALE_DEGREES);
+            for (int s = 0; s < n; s++) slot->scale_degrees[s] = (uint8_t)degrees[s];
+            slot->scale_len = n;
+            slot->scale_program = 0;
+            state_mark_dirty();
+            sse_mark_dirty();
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"invalid channel\"}");
+        }
+    }
+    else if (strcmp(type_str, "set_chord") == 0) {
+        int ch = -1;
+        json_get_int(body, "channel", &ch);
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            int intervals[MAX_CHORD_INTERVALS];
+            int n = json_get_iarray(body, "intervals", intervals, MAX_CHORD_INTERVALS);
+            for (int c = 0; c < n; c++) slot->chord_intervals[c] = (uint8_t)intervals[c];
+            slot->chord_len = n;
+            state_mark_dirty();
+            sse_mark_dirty();
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"invalid channel\"}");
+        }
+    }
+    else if (strcmp(type_str, "scale_program") == 0) {
+        int ch = -1;
+        json_get_int(body, "channel", &ch);
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            RackSlot *slot = &g_rack.slots[ch];
+            int val = 0;
+            json_get_int(body, "value", &val);
+            slot->scale_program = val ? 1 : 0;
+            if (slot->scale_program) { slot->scale_root = -1; slot->scale_len = 0; }
+            state_mark_dirty();
+            sse_mark_dirty();
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"invalid channel\"}");
+        }
+    }
+    else if (strcmp(type_str, "quit") == 0) {
+        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true,\"msg\":\"shutting down\"}");
+        http_send_response(fd, 200, "application/json", resp, rlen);
+        state_save();
+        g_quit = 1;
+        return;
+    }
+    else if (strcmp(type_str, "focus_ch") == 0) {
+        int ch = 0;
+        json_get_int(body, "channel", &ch);
+        if (ch >= 0 && ch < MAX_SLOTS) {
+            g_rack.focused_ch = ch;
+            state_mark_dirty();
+            sse_mark_dirty();
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
         }
     }
     else if (strcmp(type_str, "bpm") == 0) {
@@ -1661,12 +1758,95 @@ static void *http_thread_fn(void *arg) {
                     }
                     close(client_fd);
                 }
-                else if (strcmp(method, "GET") == 0 && strcmp(path, "/keyseq-test") == 0) {
-                    /* Serve keyseq-test.html from web/ dir */
+                else if (strcmp(method, "GET") == 0 &&
+                         (strcmp(path, "/config") == 0 || strcmp(path, "/chords") == 0)) {
                     char exe_dir[1024];
                     if (platform_exe_dir(exe_dir, sizeof(exe_dir)) == 0) {
                         char fpath[1280];
-                        snprintf(fpath, sizeof(fpath), "%sweb/keyseq-test.html", exe_dir);
+                        const char *fname = (strcmp(path, "/chords") == 0) ? "chords.html" : "config.html";
+                        snprintf(fpath, sizeof(fpath), "%sweb/%s", exe_dir, fname);
+                        FILE *f = fopen(fpath, "r");
+                        if (f) {
+                            fseek(f, 0, SEEK_END);
+                            long sz = ftell(f);
+                            fseek(f, 0, SEEK_SET);
+                            char *data = malloc((size_t)sz);
+                            if (data) {
+                                size_t rd = fread(data, 1, (size_t)sz, f);
+                                http_send_response(client_fd, 200, "text/html; charset=utf-8",
+                                                   data, (int)rd);
+                                free(data);
+                            }
+                            fclose(f);
+                        } else {
+                            http_send_response(client_fd, 404, "text/plain", "Not Found", 9);
+                        }
+                    }
+                    close(client_fd);
+                }
+                else if (strcmp(method, "GET") == 0 &&
+                         (strcmp(path, "/manifest.json") == 0 ||
+                          strcmp(path, "/icon.svg") == 0 ||
+                          strcmp(path, "/sw.js") == 0 ||
+                          strcmp(path, "/chrome.js") == 0)) {
+                    /* Serve PWA static files */
+                    char exe_dir[1024];
+                    if (platform_exe_dir(exe_dir, sizeof(exe_dir)) == 0) {
+                        char fpath[1280];
+                        snprintf(fpath, sizeof(fpath), "%sweb%s", exe_dir, path);
+                        FILE *f = fopen(fpath, "r");
+                        if (f) {
+                            fseek(f, 0, SEEK_END);
+                            long sz = ftell(f);
+                            fseek(f, 0, SEEK_SET);
+                            char *data = malloc((size_t)sz);
+                            if (data) {
+                                size_t rd = fread(data, 1, (size_t)sz, f);
+                                const char *ct = "application/octet-stream";
+                                if (strstr(path, ".json")) ct = "application/json";
+                                else if (strstr(path, ".svg")) ct = "image/svg+xml";
+                                else if (strstr(path, ".js")) ct = "application/javascript";
+                                http_send_response(client_fd, 200, ct, data, (int)rd);
+                                free(data);
+                            }
+                            fclose(f);
+                        } else {
+                            http_send_response(client_fd, 404, "text/plain", "Not Found", 9);
+                        }
+                    }
+                    close(client_fd);
+                }
+                else if (strcmp(method, "GET") == 0 && strcmp(path, "/touch") == 0) {
+                    /* Serve touch.html from web/ dir */
+                    char exe_dir[1024];
+                    if (platform_exe_dir(exe_dir, sizeof(exe_dir)) == 0) {
+                        char fpath[1280];
+                        snprintf(fpath, sizeof(fpath), "%sweb/touch.html", exe_dir);
+                        FILE *f = fopen(fpath, "r");
+                        if (f) {
+                            fseek(f, 0, SEEK_END);
+                            long sz = ftell(f);
+                            fseek(f, 0, SEEK_SET);
+                            char *data = malloc((size_t)sz);
+                            if (data) {
+                                size_t rd = fread(data, 1, (size_t)sz, f);
+                                http_send_response(client_fd, 200, "text/html; charset=utf-8",
+                                                   data, (int)rd);
+                                free(data);
+                            }
+                            fclose(f);
+                        } else {
+                            http_send_response(client_fd, 404, "text/plain", "Not Found", 9);
+                        }
+                    }
+                    close(client_fd);
+                }
+                else if (strcmp(method, "GET") == 0 && strcmp(path, "/keyseq") == 0) {
+                    /* Serve keyseq.html from web/ dir */
+                    char exe_dir[1024];
+                    if (platform_exe_dir(exe_dir, sizeof(exe_dir)) == 0) {
+                        char fpath[1280];
+                        snprintf(fpath, sizeof(fpath), "%sweb/keyseq.html", exe_dir);
                         FILE *f = fopen(fpath, "r");
                         if (f) {
                             fseek(f, 0, SEEK_END);

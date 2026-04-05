@@ -109,6 +109,27 @@ typedef struct {
     } user_presets[MAX_USER_PRESETS];
     int              num_user_presets;
     int              current_user_preset;  /* -1 = none */
+
+    /* Scale — per-slot, "from C" programming */
+    #define MAX_SCALE_DEGREES 12
+    int              scale_root;       /* MIDI note of root (-1 = none) */
+    uint8_t          scale_degrees[MAX_SCALE_DEGREES]; /* semitone offsets from root */
+    int              scale_len;        /* 0 = chromatic/off */
+    int              scale_program;    /* 1 = programming mode active */
+
+    /* Chord shape — per-slot */
+    #define MAX_CHORD_INTERVALS 8
+    uint8_t          chord_intervals[MAX_CHORD_INTERVALS]; /* semitone offsets */
+    int              chord_len;        /* 0 = off */
+
+    /* Note tracking — maps input note to what was actually sent */
+    #define MAX_HELD_NOTES 32
+    struct {
+        uint8_t input;          /* original input MIDI note */
+        uint8_t sent[MAX_CHORD_INTERVALS + 1]; /* notes actually sent to instrument */
+        int     sent_count;
+        int     active;
+    } held_notes[MAX_HELD_NOTES];
 } RackSlot;
 
 /* The rack */
@@ -116,6 +137,7 @@ typedef struct {
     RackSlot         slots[MAX_SLOTS];
     float            master_volume;
     int              local_mute;    /* 1 = silence ALSA output, only send to bus */
+    int              focused_ch;    /* global focused channel — UI follows this */
     int              n_types;       /* number of registered instrument types */
     InstrumentType  *types;         /* array of registered types */
 } Rack;

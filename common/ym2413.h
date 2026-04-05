@@ -273,8 +273,10 @@ static void ym2413_render(void *state, float *stereo_buf, int frames, int sample
         OPLL_set_rate(s->opll, (e_uint32)sample_rate);
     }
 
+    /* Tick seq once per buffer, not per sample */
+    opll_seq_tick(s, (float)frames * dt);
+
     for (int i = 0; i < frames; i++) {
-        opll_seq_tick(s, dt);
         e_int16 raw = OPLL_calc(s->opll);
         float sample = (float)raw / 32768.0f * s->volume;
         stereo_buf[i * 2]     = sample;

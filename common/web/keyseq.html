@@ -2,9 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>KeySeq Expression Tester</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0d0d0d">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<title>miniwave — keyseq</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
 :root {
   --bg: #0d0d0d; --panel: #1a1a2e; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #e0e0e0; --dim: #666; --border: #2a2a4a;
   --hw-shadow:
@@ -142,7 +151,7 @@ button.send { background: var(--good); color: #000; }
 <div id="page">
 
 <div id="header">
-  <h1><a href="/" style="color:var(--dim);text-decoration:none">miniwave</a> / <span style="color:#8866cc">keyseq</span> / <a href="/effex" style="color:#00d4aa;text-decoration:none;font-size:16px">effex</a></h1>
+  <h1><a href="/" style="color:var(--accent);text-decoration:none">miniwave</a> / <span style="color:#8866cc">keyseq</span> / <a href="/effex" style="color:#00d4aa;text-decoration:none;font-size:16px">effex</a> / <a href="/chords" style="color:#ff8800;text-decoration:none;font-size:16px">chords</a> / <a href="/config" style="color:#666;text-decoration:none;font-size:16px">cfg</a> <span id="mw-ver" style="color:var(--dim);font-size:10px;font-weight:normal"></span></h1>
   <div class="ch-nav">
     <button id="ch-prev" title="Prev channel (Cmd+[)">&lsaquo;</button>
     <span class="ch-label" id="ch-label">CH 1</span>
@@ -380,6 +389,8 @@ function setCh(ch) {
   fetchSpec();
   loadServerPresets();
   schedulePreview();
+  /* Broadcast to server — other clients follow */
+  postAPI({type:'focus_ch', channel:ch}).catch(() => {});
 }
 
 function updateChLabel() {
@@ -874,12 +885,27 @@ function connectSSE() {
     const d = safeParse(e.data);
     if (!d || !d.slots) return;
     rackSlots = d.slots;
-    updateChLabel();
+
+    /* Follow server focused channel */
+    if (typeof d.focused_ch === 'number' && d.focused_ch !== activeCh) {
+      activeCh = d.focused_ch;
+      saveCh();
+      updateChLabel();
+      fetchSpec();
+      loadServerPresets();
+      schedulePreview();
+    } else {
+      updateChLabel();
+    }
 
     /* Sync BPM from server */
     if (d.bpm && document.activeElement !== document.getElementById('bpm-input')) {
       document.getElementById('bpm-input').value = Math.round(d.bpm);
     }
+
+    /* Sync version */
+    const ver = document.getElementById('mw-ver');
+    if (ver && d.version) ver.textContent = 'v' + d.version;
 
     /* Sync MIDI device — authoritative from server */
     const sel = document.getElementById('midi-select');

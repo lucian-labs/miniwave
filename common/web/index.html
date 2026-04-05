@@ -3,9 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
 <title>WaveUI — miniwave</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
 
 :root {
   --bg: #0d0d0d;
@@ -44,108 +55,62 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Top Bar ─────────────────────────────────────────────────────── */
+/* ── Header (keyseq-style) ───────────────────────────────────────── */
 
-#topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  height: 48px;
-  flex-shrink: 0;
-}
+#header { flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
+#header h1 { color: var(--accent); font-size: 16px; white-space: nowrap; }
+#header h1 a { text-decoration: none; }
 
-#topbar .logo {
-  font-size: 18px;
-  font-weight: bold;
-  letter-spacing: 2px;
-  color: var(--accent);
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-}
+.ch-nav { display: flex; align-items: center; gap: 2px; }
+.ch-nav button { width: 24px; height: 24px; padding: 0; font-size: 13px; line-height: 24px; text-align: center; border-radius: 5px; background: var(--card); border: none; color: var(--dim); cursor: pointer; box-shadow: var(--hw-shadow); transition: all 0.15s; }
+.ch-nav button:hover { color: var(--text); }
+.ch-nav button:active { box-shadow: var(--hw-pressed); }
+.ch-label { font-size: 13px; font-weight: bold; color: var(--text); min-width: 50px; text-align: center; }
 
-#topbar .logo span { color: var(--dim); font-weight: normal; font-size: 11px; }
+.bpm-group { display: flex; align-items: center; gap: 4px; }
+.bpm-group input { width: 40px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-family: inherit; font-size: 12px; padding: 3px; border-radius: 4px; text-align: center; }
+.bpm-group input:focus { outline: none; border-color: var(--accent); }
+.bpm-group .bpm-label { font-size: 10px; color: var(--dim); text-transform: uppercase; }
+.tap-btn { padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 5px; background: var(--card); border: none; color: var(--text); cursor: pointer; box-shadow: var(--hw-shadow); transition: all 0.15s; }
+.tap-btn:active { background: var(--accent); color: white; box-shadow: var(--hw-pressed); }
 
-.midi-section {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.midi-section label { color: var(--dim); font-size: 11px; text-transform: uppercase; }
+.midi-section { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.midi-section label { margin: 0; font-size: 10px; color: var(--dim); text-transform: uppercase; }
 
 #midi-select, .sleek-select {
-  background: transparent;
-  color: var(--text);
-  border: none;
-  border-bottom: 1px solid var(--border);
-  padding: 4px 18px 4px 4px;
-  font-family: inherit;
-  font-size: 12px;
-  min-width: 150px;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23666'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 4px center;
-  cursor: pointer;
-  transition: border-color 0.15s;
+  background: var(--card); color: var(--text); border: none; padding: 4px 8px;
+  font-family: inherit; font-size: 11px; border-radius: 5px; min-width: 140px;
+  box-shadow: var(--hw-shadow-sm); cursor: pointer;
 }
-#midi-select:hover, .sleek-select:hover { border-color: var(--accent); }
-#midi-select:focus, .sleek-select:focus { outline: none; border-color: var(--accent); }
 #midi-select option, .sleek-select option { background: var(--panel); color: var(--text); }
 
-.master-section {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.master-section label { color: var(--dim); font-size: 11px; text-transform: uppercase; }
-
-#master-vol {
-  width: 100px;
-  accent-color: var(--accent);
-}
-
-#master-val { font-size: 12px; min-width: 32px; text-align: right; }
-
-.bus-only-label {
-  display: flex; align-items: center; gap: 4px; cursor: pointer;
-  font-size: 10px; color: var(--dim); text-transform: none; margin-left: 8px;
-}
-.bus-only-label input { accent-color: var(--accent); margin: 0; }
+.master-group { display: flex; align-items: center; gap: 6px; }
+.master-group label { color: var(--dim); font-size: 10px; text-transform: uppercase; }
+#master-vol { width: 80px; accent-color: var(--accent); }
+#master-val { font-size: 11px; color: var(--dim); min-width: 28px; }
 
 .audio-badge {
   font-size: 9px; font-weight: bold; text-transform: uppercase;
-  padding: 3px 7px; border-radius: 4px; margin-left: 6px;
-  background: var(--card); color: var(--dim);
-  border: none;
+  padding: 3px 7px; border-radius: 4px;
+  background: var(--card); color: var(--dim); border: none;
   box-shadow: var(--hw-shadow-sm);
 }
 .audio-badge.jack { background: var(--good); color: #000; box-shadow: var(--hw-pressed); }
 
 .status-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #555;
-  margin-left: 12px;
-  transition: background 0.3s;
+  width: 10px; height: 10px; border-radius: 50%; background: #555; transition: background 0.3s;
 }
-
 .status-dot.connected { background: var(--good); box-shadow: 0 0 6px var(--good); }
 
 /* ── Main Layout ─────────────────────────────────────────────────── */
 
+#page { display: flex; flex-direction: column; height: 100%; padding: 16px 20px; gap: 12px; }
+
 #main {
   display: flex;
   flex-direction: column;
-  height: calc(100% - 48px - 38px); /* topbar + footer */
+  flex: 1;
+  min-height: 0;
   position: relative;
 }
 
@@ -165,7 +130,7 @@ html, body {
 /* ── Rack Grid ───────────────────────────────────────────────────── */
 
 #rack {
-  width: 200px;
+  width: 220px;
   flex-shrink: 0;
   overflow-y: auto;
   padding: 8px;
@@ -174,7 +139,16 @@ html, body {
   gap: 4px;
   border-left: 1px solid var(--border);
   background: var(--panel);
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.5);
 }
+#rack.open { transform: translateX(0); }
 
 .ch-strip {
   background: var(--card);
@@ -301,7 +275,7 @@ html, body {
 #detail {
   flex: 1;
   background: var(--panel);
-  display: none;
+  display: flex;
   flex-direction: column;
   overflow-y: auto;
 }
@@ -605,52 +579,7 @@ html, body {
 
 /* ── Status Footer ───────────────────────────────────────────────── */
 
-#status-footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-  padding: 4px 12px;
-  font-size: 10px;
-  color: var(--dim);
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.footer-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  white-space: nowrap;
-}
-
-.footer-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.footer-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #333;
-  flex-shrink: 0;
-}
-
-.footer-dot.on { background: var(--good); box-shadow: 0 0 4px var(--good); }
-.footer-dot.warn { background: var(--solo); }
-.footer-dot.off { background: #333; }
-
-.footer-label { color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; }
-.footer-val { color: var(--text); }
-
-#status-footer a { color: var(--dim); text-decoration: none; }
-#status-footer a:hover { color: var(--text); }
+/* footer removed — status at /config */
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 
@@ -676,17 +605,32 @@ html, body {
 </head>
 <body>
 
-<div id="topbar">
-  <div class="logo">miniwave / <a href="/keyseq-test" style="color:#8866cc;text-decoration:none">keyseq</a> / <a href="/effex" style="color:#00d4aa;text-decoration:none">effex</a> / <a href="javascript:void(0)" id="mon-toggle" style="color:#ff8800;text-decoration:none">mon</a></div>
-  <div class="master-section">
+<div id="page">
+
+<div id="header">
+  <h1><span style="color:var(--accent)">rack</span> / <a href="/keyseq" style="color:#8866cc">keyseq</a> / <a href="/effex" style="color:#00d4aa">effex</a> / <a href="/chords" style="color:#ff8800">chords</a> / <a href="/config" style="color:#666">cfg</a> <span id="f-version" style="color:var(--dim);font-size:10px;font-weight:normal"></span></h1>
+  <div class="ch-nav">
+    <button id="ch-prev">&lsaquo;</button>
+    <span class="ch-label" id="ch-label">CH 1</span>
+    <button id="ch-next">&rsaquo;</button>
+  </div>
+  <div class="bpm-group">
+    <input type="text" id="bpm-input" value="120">
+    <span class="bpm-label">bpm</span>
+    <button class="tap-btn" id="tap-btn">TAP</button>
+  </div>
+  <div class="master-group">
     <label>Master</label>
     <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.75">
     <span id="master-val">0.75</span>
-    <label class="bus-only-label" title="Mute local audio — send only to waveOS bus">
-      <input type="checkbox" id="bus-only-cb"> Bus Only
-    </label>
     <span id="audio-badge" class="audio-badge">ALSA</span>
     <div class="status-dot" id="status-dot"></div>
+  </div>
+  <div class="midi-section">
+    <label>MIDI</label>
+    <select id="midi-select"><option value="">No Device</option></select>
+    <button class="tap-btn" id="rack-toggle">rack</button>
+    <a href="javascript:void(0)" id="mon-toggle" style="color:#ff8800;text-decoration:none;font-size:10px">mon</a>
   </div>
 </div>
 
@@ -709,50 +653,7 @@ html, body {
   <div id="midi-log" style="color:#0f0;"></div>
 </div>
 
-<div id="status-footer">
-  <div class="footer-row">
-    <div class="footer-item">
-      <span class="footer-dot" id="f-audio-dot"></span>
-      <span class="footer-label">Audio</span>
-      <span class="footer-val" id="f-audio-val">—</span>
-    </div>
-    <div class="footer-item">
-      <span class="footer-dot" id="f-midi-dot"></span>
-      <span class="footer-label">MIDI</span>
-      <span class="footer-val" id="f-midi-val">—</span>
-    </div>
-    <div class="footer-item">
-      <span class="footer-dot" id="f-bus-dot"></span>
-      <span class="footer-label">Bus</span>
-      <span class="footer-val" id="f-bus-val">—</span>
-    </div>
-    <span class="footer-val" style="margin-left:auto;color:var(--dim);" id="f-version">ui:0.3.1</span>
-  </div>
-  <div class="footer-row">
-    <div class="footer-item">
-      <span class="footer-dot" id="f-osc-dot"></span>
-      <span class="footer-label">OSC</span>
-      <span class="footer-val" id="f-osc-val">—</span>
-    </div>
-    <div class="footer-item">
-      <span class="footer-dot" id="f-mcast-dot"></span>
-      <span class="footer-label">Multicast</span>
-      <span class="footer-val" id="f-mcast-val">—</span>
-    </div>
-    <div class="footer-item">
-      <span class="footer-dot" id="f-sse-dot"></span>
-      <span class="footer-label">SSE</span>
-      <span class="footer-val" id="f-sse-val">—</span>
-    </div>
-    <div class="footer-item" style="margin-left:auto;">
-      <a href="/osc-map" target="_blank">osc-map</a>
-    </div>
-    <div class="midi-section" style="margin-left:8px;">
-      <label>MIDI</label>
-      <select id="midi-select"><option value="">No Device</option></select>
-    </div>
-  </div>
-</div>
+<!-- footer removed — status moved to /config, version in header -->
 
 <script>
 'use strict';
@@ -800,6 +701,10 @@ let rackState = {
   master_volume: 0.75,
   midi_device: ''
 };
+let _gotRackStatus = false;
+let _gotRackTypes = false;
+let _initDone = false;
+let _initFocusCh = 0;
 
 let instrumentTypes = [];
 let midiDevices = [];
@@ -821,10 +726,10 @@ function connect() {
     document.getElementById('status-dot').classList.add('connected');
     if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
 
-    // Re-send MIDI device on reconnect (server may have restarted)
+    // Re-connect Web MIDI on reconnect
     const sel = document.getElementById('midi-select');
     if (sel && sel.value) {
-      setTimeout(() => send({ type: 'midi_device', value: sel.value }), 500);
+      setTimeout(() => connectWebMidi(sel.value), 500);
     }
   };
 
@@ -888,6 +793,20 @@ function handleMessage(data) {
       rackState.version = data.version;
       updateRack();
       updateTopBar();
+
+      /* Track init state — need both rack_status and rack_types before opening detail */
+      _gotRackStatus = true;
+      _initFocusCh = (typeof data.focused_ch === 'number') ? data.focused_ch : 0;
+      if (!_initDone && _gotRackTypes) {
+        _initDone = true;
+        openDetail(_initFocusCh);
+      }
+
+      /* Follow server focused channel (don't re-trigger if we set it) */
+      if (_initDone && typeof data.focused_ch === 'number' && data.focused_ch !== activeDetail) {
+        openDetail(data.focused_ch);
+      }
+
       /* Re-render detail pane if instrument type changed */
       if (activeDetail >= 0) {
         const newType = rackState.slots[activeDetail] ? rackState.slots[activeDetail].type : null;
@@ -901,6 +820,11 @@ function handleMessage(data) {
     case 'rack_types':
       instrumentTypes = data.types;
       updateTypeDropdowns();
+      _gotRackTypes = true;
+      if (!_initDone && _gotRackStatus) {
+        _initDone = true;
+        openDetail(_initFocusCh);
+      }
       break;
     case 'midi_devices':
       midiDevices = data.devices;
@@ -1119,9 +1043,9 @@ function updateTopBar() {
   badge.textContent = backend;
   badge.className = 'audio-badge' + (backend === 'JACK' ? ' jack' : '');
 
-  // Sync local_mute checkbox
+  // Sync local_mute checkbox (if present)
   const cb = document.getElementById('bus-only-cb');
-  if (document.activeElement !== cb) {
+  if (cb && document.activeElement !== cb) {
     cb.checked = !!rackState.local_mute;
   }
 
@@ -1129,96 +1053,63 @@ function updateTopBar() {
 }
 
 function updateFooter() {
-  const r = rackState;
-
-  // Audio
-  const audioDot = document.getElementById('f-audio-dot');
-  const audioVal = document.getElementById('f-audio-val');
-  if (audioDot && audioVal) {
-    audioDot.className = 'footer-dot on';
-    let audioText = r.audio_backend || '—';
-    if (r.audio_device) audioText += ' ' + r.audio_device;
-    if (r.period_size) audioText += ' buf=' + r.period_size;
-    if (r.sample_rate) audioText += ' ' + (r.sample_rate/1000) + 'kHz';
-    if (r.cpu_load !== undefined) audioText += ' cpu=' + (r.cpu_load * 100).toFixed(1) + '%';
-    audioVal.textContent = audioText;
-
   const verEl = document.getElementById('f-version');
-  if (verEl && r.version) verEl.textContent = 'engine:' + r.version + ' ui:0.3.1';
-  }
+  if (verEl && rackState.version) verEl.textContent = 'v' + rackState.version;
+}
 
-  // MIDI
-  const midiDot = document.getElementById('f-midi-dot');
-  const midiVal = document.getElementById('f-midi-val');
-  if (midiDot && midiVal) {
-    const hasMidi = r.midi_device && r.midi_device.length > 0;
-    midiDot.className = 'footer-dot' + (hasMidi ? ' on' : ' off');
-    midiVal.textContent = hasMidi ? r.midi_device : 'none';
-  }
+/* Web MIDI — enumerate browser's local MIDI inputs, forward to Pi */
+let webMidiAccess = null;
+let webMidiInput = null;
 
-  // Bus
-  const busDot = document.getElementById('f-bus-dot');
-  const busVal = document.getElementById('f-bus-val');
-  if (busDot && busVal) {
-    const hasBus = r.bus_active === 1;
-    busDot.className = 'footer-dot' + (hasBus ? ' on' : ' off');
-    busVal.textContent = hasBus ? 'slot ' + r.bus_slot : 'none';
+function updateMidiDropdown() {
+  /* Only populate from Web MIDI API, not server devices */
+  if (!navigator.requestMIDIAccess) {
+    const sel = document.getElementById('midi-select');
+    sel.innerHTML = '<option value="">Web MIDI not supported</option>';
+    return;
   }
-
-  // OSC
-  const oscDot = document.getElementById('f-osc-dot');
-  const oscVal = document.getElementById('f-osc-val');
-  if (oscDot && oscVal) {
-    oscDot.className = 'footer-dot on';
-    oscVal.textContent = ':' + (r.osc_port || 9000);
-  }
-
-  // Multicast
-  const mcastDot = document.getElementById('f-mcast-dot');
-  const mcastVal = document.getElementById('f-mcast-val');
-  if (mcastDot && mcastVal) {
-    const hasMcast = r.mcast_active === 1;
-    mcastDot.className = 'footer-dot' + (hasMcast ? ' on' : ' off');
-    mcastVal.textContent = hasMcast ? (r.mcast_group || '—') : 'off';
-  }
-
-  // SSE
-  const sseDot = document.getElementById('f-sse-dot');
-  const sseVal = document.getElementById('f-sse-val');
-  if (sseDot && sseVal) {
-    const n = r.sse_clients || 0;
-    sseDot.className = 'footer-dot' + (n > 0 ? ' on' : ' off');
-    sseVal.textContent = n + ' client' + (n !== 1 ? 's' : '');
+  if (webMidiAccess) populateWebMidi(webMidiAccess);
+  else {
+    navigator.requestMIDIAccess({sysex: false}).then(access => {
+      webMidiAccess = access;
+      populateWebMidi(access);
+      access.onstatechange = () => populateWebMidi(access);
+    }).catch(() => {
+      const sel = document.getElementById('midi-select');
+      sel.innerHTML = '<option value="">MIDI access denied</option>';
+    });
   }
 }
 
-function updateMidiDropdown() {
+function populateWebMidi(access) {
   const sel = document.getElementById('midi-select');
   const prevVal = sel.value;
   sel.innerHTML = '<option value="">No Device</option>';
-  for (const d of midiDevices) {
+  for (const [id, input] of access.inputs) {
     const opt = document.createElement('option');
-    opt.value = d.id;
-    opt.textContent = `${d.name} (${d.id})`;
+    opt.value = id;
+    opt.textContent = input.name || id;
     sel.appendChild(opt);
   }
+  if (prevVal) sel.value = prevVal;
+}
 
-  // Match by server-reported name (contains "client:port") or keep previous
-  const serverDev = rackState.midi_device || '';
-  let matched = false;
-  for (const d of midiDevices) {
-    if (serverDev && serverDev.includes(d.id)) {
-      sel.value = d.id;
-      matched = true;
-      break;
+function connectWebMidi(inputId) {
+  /* Disconnect previous */
+  if (webMidiInput) {
+    webMidiInput.onmidimessage = null;
+    webMidiInput = null;
+  }
+  if (!inputId || !webMidiAccess) return;
+  const input = webMidiAccess.inputs.get(inputId);
+  if (!input) return;
+  webMidiInput = input;
+  input.onmidimessage = (e) => {
+    /* Forward all MIDI messages raw to Pi */
+    if (e.data.length >= 2) {
+      send({type:'midi_raw', data:Array.from(e.data)});
     }
-  }
-  if (!matched) sel.value = prevVal;
-
-  // If server has no MIDI but we had one selected, re-send it
-  if (!serverDev && prevVal && prevVal !== '') {
-    send({ type: 'midi_device', value: prevVal });
-  }
+  };
 }
 
 // Master volume
@@ -1229,19 +1120,23 @@ document.getElementById('master-vol').addEventListener('input', (e) => {
 });
 
 // Bus-only mode (mute local audio, send only to shared memory bus)
-document.getElementById('bus-only-cb').addEventListener('change', (e) => {
-  send({ type: 'local_mute', value: e.target.checked ? 1 : 0 });
-});
+{ const bcb = document.getElementById('bus-only-cb');
+  if (bcb) bcb.addEventListener('change', (e) => {
+    send({ type: 'local_mute', value: e.target.checked ? 1 : 0 });
+  });
+}
 
-// MIDI device
+// Web MIDI device — connect browser's local MIDI input
 document.getElementById('midi-select').addEventListener('change', (e) => {
-  send({ type: 'midi_device', value: e.target.value });
+  connectWebMidi(e.target.value);
 });
 
 // ── Detail Pane ──────────────────────────────────────────────────
 
 function openDetail(ch) {
   activeDetail = ch;
+  const lbl = document.getElementById('ch-label');
+  if (lbl) lbl.textContent = 'CH ' + (ch + 1);
   channelStates[ch] = channelStates[ch] || null;
   send({ type: 'ch_status', channel: ch });
   /* Tell server to push detail updates for this channel via SSE */
@@ -1250,6 +1145,8 @@ function openDetail(ch) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ channel: ch })
   }).catch(() => {});
+  /* Broadcast focused channel — other clients follow */
+  send({ type: 'focus_ch', channel: ch });
 
   fetchSpec(ch).then(() => {
     const detail = document.getElementById('detail');
@@ -2131,10 +2028,10 @@ function updateDetail() {
 }
 
 
-// ── Logo click → close detail ────────────────────────────────────
+// ── Logo click → toggle rack drawer ──────────────────────────────
 
-document.querySelector('#topbar .logo').addEventListener('click', () => {
-  if (activeDetail >= 0) closeDetail();
+document.querySelector('#header h1').addEventListener('click', () => {
+  document.getElementById('rack').classList.toggle('open');
 });
 
 // ── MIDI Monitor ────────────────────────────────────────────────
@@ -2167,19 +2064,72 @@ document.getElementById('mon-toggle').addEventListener('click', (e) => {
 
 // ── Init ─────────────────────────────────────────────────────────
 
-/* Open channel from ?ch= URL param */
-const urlCh = new URLSearchParams(location.search).get('ch');
+/* Topbar channel nav */
+document.getElementById('ch-prev').addEventListener('click', () => {
+  openDetail((activeDetail + 15) % 16);
+  send({ type: 'focus_ch', channel: activeDetail });
+});
+document.getElementById('ch-next').addEventListener('click', () => {
+  openDetail((activeDetail + 1) % 16);
+  send({ type: 'focus_ch', channel: activeDetail });
+});
+
+/* Rack drawer toggle */
+document.getElementById('rack-toggle').addEventListener('click', () => {
+  document.getElementById('rack').classList.toggle('open');
+});
+
+/* Update topbar ch label when detail changes */
+const _origOpenDetail = openDetail;
 
 renderRack();
 connect();
+const urlCh = new URLSearchParams(location.search).get('ch');
 if (urlCh !== null) {
   const ch = parseInt(urlCh);
-  if (ch >= 0 && ch < 16) setTimeout(() => openDetail(ch), 500);
-} else {
-  fetchSpec(0);
+  if (ch >= 0 && ch < 16) {
+    _initDone = true; /* URL param overrides server focused_ch */
+    setTimeout(() => openDetail(ch), 800);
+  }
 }
+/* Otherwise, first rack_status + rack_types SSE events trigger openDetail */
 renderKeyboard(0);
 
+/* BPM + tap tempo */
+{
+  const bpmInput = document.getElementById('bpm-input');
+  const tapBtn = document.getElementById('tap-btn');
+  let tapTimes = [];
+
+  bpmInput.addEventListener('change', () => {
+    const v = parseFloat(bpmInput.value);
+    if (v > 0 && v <= 999)
+      fetch('/api', {method:'POST', body:JSON.stringify({type:'bpm', value:v})});
+  });
+
+  tapBtn.addEventListener('click', () => {
+    const now = performance.now();
+    tapTimes.push(now);
+    if (tapTimes.length > 8) tapTimes.shift();
+    if (tapTimes.length >= 2) {
+      const intervals = [];
+      for (let i = 1; i < tapTimes.length; i++) intervals.push(tapTimes[i] - tapTimes[i-1]);
+      const avg = intervals.reduce((a,b) => a+b) / intervals.length;
+      const bpm = Math.round(60000 / avg);
+      if (bpm > 20 && bpm < 400) {
+        bpmInput.value = bpm;
+        fetch('/api', {method:'POST', body:JSON.stringify({type:'bpm', value:bpm})});
+      }
+    }
+    clearTimeout(tapBtn._reset);
+    tapBtn._reset = setTimeout(() => { tapTimes = []; }, 2000);
+  });
+}
+
+/* BPM + version sync handled by updateTopBar/updateFooter in handleMessage */
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 </script>
+</div><!-- #page -->
 </body>
 </html>
