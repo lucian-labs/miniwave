@@ -1,0 +1,1992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>WaveUI — miniwave</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+
+:root {
+  --bg: #0d0d0d;
+  --panel: #111;
+  --card: #16213e;
+  --card-hover: #1a2744;
+  --accent: #e94560;
+  --good: #00d4aa;
+  --solo: #ffd700;
+  --mute: #e94560;
+  --text: #eee;
+  --dim: #aaa;
+  --border: #2a2a4a;
+  --lcd-bg: #0a1a0a;
+  --lcd-fg: #00ff88;
+  --hw-shadow:
+    rgba(255,255,255,0.18) 0 1px 1px 0 inset,
+    rgba(0,0,0,0.7) 0 -1px 1px 0 inset,
+    rgba(0,0,0,0.25) 0 1px 2px 0,
+    rgba(0,0,0,0.22) 0 3px 4px -1px,
+    rgba(0,0,0,0.18) 0 6px 8px -2px;
+  --hw-shadow-sm:
+    rgba(255,255,255,0.15) 0 1px 0 0 inset,
+    rgba(0,0,0,0.6) 0 -1px 0 0 inset,
+    rgba(0,0,0,0.3) 0 1px 2px 0;
+  --hw-pressed: rgba(0,0,0,0.85) 0 1px 5px 0 inset;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 13px;
+  height: 100%;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Header (keyseq-style) ───────────────────────────────────────── */
+
+#header { flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
+#header h1 { color: var(--accent); font-size: 16px; white-space: nowrap; }
+#header h1 a { text-decoration: none; }
+
+.ch-nav { display: flex; align-items: center; gap: 2px; }
+.ch-nav button { width: 24px; height: 24px; padding: 0; font-size: 13px; line-height: 24px; text-align: center; border-radius: 5px; background: var(--card); border: none; color: var(--dim); cursor: pointer; box-shadow: var(--hw-shadow); transition: all 0.15s; }
+.ch-nav button:hover { color: var(--text); }
+.ch-nav button:active { box-shadow: var(--hw-pressed); }
+.ch-label { font-size: 13px; font-weight: bold; color: var(--text); min-width: 50px; text-align: center; }
+
+.bpm-group { display: flex; align-items: center; gap: 4px; }
+.bpm-group input { width: 40px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-family: inherit; font-size: 12px; padding: 3px; border-radius: 4px; text-align: center; }
+.bpm-group input:focus { outline: none; border-color: var(--accent); }
+.bpm-group .bpm-label { font-size: 10px; color: var(--dim); text-transform: uppercase; }
+.tap-btn { padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 5px; background: var(--card); border: none; color: var(--text); cursor: pointer; box-shadow: var(--hw-shadow); transition: all 0.15s; }
+.tap-btn:active { background: var(--accent); color: white; box-shadow: var(--hw-pressed); }
+
+.midi-section { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.midi-section label { margin: 0; font-size: 10px; color: var(--dim); text-transform: uppercase; }
+
+#midi-select, .sleek-select {
+  background: var(--card); color: var(--text); border: none; padding: 4px 8px;
+  font-family: inherit; font-size: 11px; border-radius: 5px; min-width: 140px;
+  box-shadow: var(--hw-shadow-sm); cursor: pointer;
+}
+#midi-select option, .sleek-select option { background: var(--panel); color: var(--text); }
+
+.master-group { display: flex; align-items: center; gap: 6px; }
+.master-group label { color: var(--dim); font-size: 10px; text-transform: uppercase; }
+#master-vol { width: 80px; accent-color: var(--accent); }
+#master-val { font-size: 11px; color: var(--dim); min-width: 28px; }
+
+.audio-badge {
+  font-size: 9px; font-weight: bold; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 4px;
+  background: var(--card); color: var(--dim); border: none;
+  box-shadow: var(--hw-shadow-sm);
+}
+.audio-badge.jack { background: var(--good); color: #000; box-shadow: var(--hw-pressed); }
+
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%; background: #555; transition: background 0.3s;
+}
+.status-dot.connected { background: var(--good); box-shadow: 0 0 6px var(--good); }
+
+/* ── Main Layout ─────────────────────────────────────────────────── */
+
+#page { display: flex; flex-direction: column; height: 100%; padding: 16px 20px; gap: 12px; }
+
+#main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+#main-upper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+#keyboard-bar {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 4px 8px;
+  flex-shrink: 0;
+}
+
+/* ── Rack Grid ───────────────────────────────────────────────────── */
+
+#rack {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  align-content: start;
+  background: var(--panel);
+}
+
+.ch-strip {
+  background: var(--card);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  box-shadow: var(--hw-shadow);
+}
+
+.ch-strip:hover { background: var(--card-hover); }
+.ch-strip.active-detail { box-shadow: var(--hw-pressed), 0 0 8px rgba(233,69,96,0.3); }
+
+.ch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ch-num { font-size: 10px; font-weight: bold; color: var(--dim); }
+
+.ch-buttons { display: flex; gap: 4px; }
+
+.ch-btn {
+  width: 22px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  padding: 0;
+  box-shadow: var(--hw-shadow-sm);
+}
+
+.ch-btn:hover { color: var(--text); }
+.ch-btn:active { box-shadow: var(--hw-pressed); }
+.ch-btn.active-indicator { color: var(--good); font-size: 8px; box-shadow: none; width: 16px; background: transparent; }
+.ch-btn.active-indicator.sounding { color: var(--good); text-shadow: 0 0 6px var(--good); animation: pulse 0.5s ease infinite; }
+.ch-btn.mute-on { background: var(--mute); color: #fff; box-shadow: var(--hw-pressed); }
+.ch-btn.solo-on { background: var(--solo); color: #000; box-shadow: var(--hw-pressed); }
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.ch-type-select {
+  width: 100%;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-family: inherit;
+  font-size: 10px;
+  height: 20px;
+}
+
+.ch-preset {
+  font-size: 10px;
+  color: var(--dim);
+  display: flex;
+  justify-content: space-between;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ch-preset .name { color: var(--text); text-overflow: ellipsis; overflow: hidden; }
+.ch-preset .num { color: var(--accent); font-size: 9px; flex-shrink: 0; margin-left: 4px; }
+
+.ch-vol-bar {
+  height: 4px;
+  background: #111;
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  cursor: ew-resize;
+}
+
+.ch-vol-fill {
+  height: 100%;
+  background: var(--good);
+  border-radius: 2px;
+  transition: width 0.1s;
+}
+
+.ch-vol-val { display: none; }
+
+.ch-activity {
+  font-size: 9px;
+  color: var(--dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  line-height: 1;
+}
+
+.ch-activity .meter {
+  display: flex;
+  gap: 1px;
+}
+
+.ch-activity .meter-dot {
+  width: 4px;
+  height: 8px;
+  background: #222;
+  border-radius: 1px;
+}
+
+.ch-activity .meter-dot.on { background: var(--good); }
+
+/* ── Detail Pane ─────────────────────────────────────────────────── */
+
+#detail {
+  flex: 1;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+#detail.open { display: flex; }
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  gap: 8px;
+}
+
+.detail-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-nav-btn {
+  background: var(--card);
+  border: none;
+  border-radius: 5px;
+  color: var(--dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 10px;
+  font-family: inherit;
+  line-height: 1;
+  transition: all 0.15s;
+  box-shadow: var(--hw-shadow);
+}
+
+.detail-nav-btn:hover { color: var(--text); }
+.detail-nav-btn:active { box-shadow: var(--hw-pressed); }
+
+.detail-ch-label {
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.detail-type-select {
+  background: transparent;
+  color: var(--accent);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 2px 4px 2px 0;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23666'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 2px center;
+  padding-right: 14px;
+  min-width: 80px;
+  transition: border-color 0.15s;
+}
+
+.detail-type-select:hover { border-color: var(--accent); }
+.detail-type-select:focus { outline: none; border-color: var(--accent); }
+.detail-type-select option { background: var(--panel); color: var(--text); }
+
+.detail-body { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.detail-columns { display: flex; gap: 16px; flex: 1; }
+.detail-col-left { flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+.detail-col-right { flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+
+/* Preset Browser */
+.preset-section { display: flex; flex-direction: column; gap: 8px; }
+.preset-section h3 { font-size: 11px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+
+.preset-lcd {
+  background: var(--lcd-bg);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 16px;
+  color: var(--lcd-fg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: inherit;
+  text-shadow: 0 0 8px var(--lcd-fg);
+  box-shadow: rgba(0,0,0,0.85) 0 1px 5px 0 inset, rgba(0,0,0,0.4) 0 2px 6px 0;
+}
+
+.preset-lcd .num { color: var(--lcd-fg); opacity: 0.7; font-size: 14px; }
+
+.family-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.family-btn {
+  padding: 5px 10px;
+  background: var(--card);
+  border: none;
+  border-radius: 5px;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  box-shadow: var(--hw-shadow);
+}
+
+.family-btn:hover { color: var(--text); }
+.family-btn:active { box-shadow: var(--hw-pressed); }
+.family-btn.active { background: var(--accent); color: #fff; box-shadow: var(--hw-pressed); }
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.preset-btn {
+  padding: 6px 4px;
+  background: var(--card);
+  border: none;
+  border-radius: 5px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: var(--hw-shadow-sm);
+}
+
+.preset-btn:hover { color: #fff; }
+.preset-btn:active { box-shadow: var(--hw-pressed); }
+.preset-btn.active { background: var(--accent); color: #fff; box-shadow: var(--hw-pressed); }
+
+/* Parameters */
+.params-section { display: flex; flex-direction: column; gap: 8px; }
+
+.params-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.params-header h3 { font-size: 11px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+
+.override-badge {
+  font-size: 9px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--dim);
+  border: none;
+  box-shadow: var(--hw-shadow-sm);
+}
+
+.override-badge.on { background: var(--accent); color: #fff; box-shadow: var(--hw-pressed); }
+
+.reset-btn {
+  padding: 4px 10px;
+  background: var(--card);
+  border: none;
+  border-radius: 5px;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: var(--hw-shadow);
+}
+
+.reset-btn:hover { color: var(--accent); }
+.reset-btn:active { box-shadow: var(--hw-pressed); }
+
+.params-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.param-control {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.param-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+}
+
+.param-label .name { color: var(--dim); text-transform: uppercase; }
+.param-label .val { color: var(--text); }
+
+.param-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  height: 16px;
+}
+
+/* ADSR Canvas */
+.adsr-canvas {
+  width: 100%;
+  height: 120px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  touch-action: none;
+}
+.adsr-values {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--dim);
+  padding: 0 2px;
+}
+.adsr-values span { font-family: inherit; }
+
+/* Virtual Keyboard */
+.seq-section { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
+.seq-toggle { width: 36px; height: 20px; border-radius: 10px; border: none; background: var(--card); cursor: pointer; position: relative; transition: all 0.15s; flex-shrink: 0; box-shadow: var(--hw-shadow-sm); }
+.seq-toggle.on { background: #8866cc; box-shadow: var(--hw-pressed); }
+.seq-toggle::after { content: ''; position: absolute; width: 14px; height: 14px; border-radius: 50%; background: var(--text); top: 2px; left: 2px; transition: left 0.15s; }
+.seq-toggle.on::after { left: 18px; }
+.seq-dsl { flex: 1; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.seq-dsl:hover { color: #8866cc; }
+
+.keyboard-section { display: flex; flex-direction: column; gap: 6px; }
+.keyboard-section h3 { font-size: 11px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+
+.keyboard {
+  display: flex;
+  position: relative;
+  height: 80px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.key {
+  border: 1px solid #333;
+  border-radius: 0 0 3px 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  font-size: 8px;
+  transition: background 0.05s;
+}
+
+.key.white {
+  background: #ddd;
+  color: #666;
+  flex: 1;
+  height: 100%;
+  z-index: 1;
+}
+
+.key.black {
+  background: #222;
+  color: #888;
+  width: 24px;
+  height: 55%;
+  position: absolute;
+  z-index: 2;
+}
+
+.key.white:active, .key.white.pressed { background: var(--accent); color: #fff; }
+.key.black:active, .key.black.pressed { background: var(--accent); color: #fff; }
+
+.note-display { font-size: 11px; color: var(--dim); text-align: center; height: 16px; }
+
+/* Detail Volume */
+.detail-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.detail-volume label { font-size: 11px; color: var(--dim); text-transform: uppercase; min-width: 50px; }
+.detail-volume input { flex: 1; accent-color: var(--good); }
+.detail-volume .val { font-size: 12px; min-width: 32px; text-align: right; }
+
+/* ── Status Footer ───────────────────────────────────────────────── */
+
+/* footer removed — status at /config */
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .midi-section { display: none; }
+  #master-vol { width: 60px; }
+}
+</style>
+</head>
+<body>
+
+<div id="page">
+
+<div id="header" style="display:none"></div>
+
+<div id="main">
+  <div id="main-upper">
+    <div id="detail"></div>
+    <div id="rack"></div>
+  </div>
+  <div id="keyboard-bar">
+    <div class="note-display" id="note-display">&nbsp;</div>
+    <div class="keyboard" id="keyboard"></div>
+  </div>
+</div>
+
+<div id="midi-monitor" style="display:none;position:absolute;top:48px;left:0;right:0;bottom:38px;background:var(--bg);z-index:100;overflow-y:auto;padding:12px;font-family:monospace;font-size:12px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span style="color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px;">MIDI Monitor</span>
+    <button onclick="document.getElementById('midi-log').innerHTML=''" style="background:var(--card);color:var(--text);border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Clear</button>
+  </div>
+  <div id="midi-log" style="color:#0f0;"></div>
+</div>
+
+<!-- footer removed — status moved to /config, version in header -->
+
+<script>
+'use strict';
+
+/* ── Mode: detail (synth view) or grid (16-ch rack) ── */
+const _mode = new URLSearchParams(location.search).get('mode') || 'detail';
+if (_mode === 'grid') {
+  /* Grid mode: show rack full-width, hide detail + keyboard */
+  /* Grid mode: show rack, hide detail + keyboard + header */
+  const _detail = document.getElementById('detail');
+  if (_detail) _detail.style.display = 'none';
+  const kb = document.getElementById('keyboard-bar');
+  if (kb) kb.style.display = 'none';
+  const hdr = document.getElementById('header');
+  if (hdr) hdr.style.display = 'none';
+} else {
+  /* Detail mode: hide rack — it has its own tab */
+  const _rack = document.getElementById('rack');
+  if (_rack) _rack.style.display = 'none';
+}
+
+// ── Instrument Schemas (populated from keyseq_spec) ─────────────
+
+let instSchemas = {};
+/* Static data populated from keyseq_spec (kept for patch section compatibility) */
+
+let _specDone = false;
+async function fetchSpec(ch) {
+  if (_specDone) return;
+  try {
+    const r = await fetch('/api', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'keyseq_spec', channel: ch || 0 })
+    });
+    if (!r.ok) return;
+    const spec = await r.json();
+    if (!spec.instruments) return;
+    instSchemas = spec.instruments;
+    _specDone = true;
+    const fm = instSchemas['fm-synth'];
+    /* All instrument data now accessed via instSchemas directly */
+  } catch (e) {}
+}
+
+/* Helpers used by generic renderer */
+function logToSlider(val, min, max) { return Math.log(val / Math.max(min, 0.001)) / Math.log(max / Math.max(min, 0.001)); }
+function sliderToLog(t, min, max) { return Math.max(min, 0.001) * Math.pow(max / Math.max(min, 0.001), t); }
+function fmtVal(p, v) {
+  if (p.log || p.scale === 'log') return v < 1000 ? v.toFixed(0) + ' Hz' : (v/1000).toFixed(1) + ' kHz';
+  if (p.labels && p.type === 'int') return p.labels[Math.round(v)] || String(Math.round(v));
+  if (p.type === 'int') return String(Math.round(v));
+  return v.toFixed(v >= 100 ? 0 : v >= 1 ? 2 : 3);
+}
+
+
+// ── State ────────────────────────────────────────────────────────
+
+let rackState = {
+  slots: Array.from({length: 16}, () => ({
+    active: 0, type: '', volume: 1, mute: 0, solo: 0
+  })),
+  master_volume: 0.75,
+  midi_device: ''
+};
+let _gotRackStatus = false;
+let _gotRackTypes = false;
+let _initDone = false;
+let _initFocusCh = 0;
+
+let instrumentTypes = [];
+let midiDevices = [];
+let activeDetail = -1;
+let channelStates = {};
+let pressedKeys = new Set();
+
+// ── SSE + Fetch Transport ─────────────────────────────────────────
+
+let evtSource = null;
+let reconnectTimer = null;
+
+function connect() {
+  if (evtSource) return;
+
+  evtSource = new EventSource('/events');
+
+  evtSource.onopen = () => {
+    const dot = document.getElementById('status-dot');
+    if (dot) dot.classList.add('connected');
+    if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+  };
+
+  evtSource.onerror = () => {
+    const dot = document.getElementById('status-dot');
+    if (dot) dot.classList.remove('connected');
+    evtSource.close();
+    evtSource = null;
+    if (!reconnectTimer) reconnectTimer = setInterval(connect, 2000);
+  };
+
+  evtSource.addEventListener('rack_status', (e) => {
+    try { handleMessage(JSON.parse(e.data)); } catch (err) {}
+  });
+
+  evtSource.addEventListener('rack_types', (e) => {
+    try { handleMessage(JSON.parse(e.data)); } catch (err) {}
+  });
+
+  evtSource.addEventListener('midi_devices', (e) => {
+    try { handleMessage(JSON.parse(e.data)); } catch (err) {}
+  });
+
+  evtSource.addEventListener('ch_status', (e) => {
+    try { handleMessage(JSON.parse(e.data)); } catch (err) {}
+  });
+
+  evtSource.addEventListener('midi_events', (e) => {
+    try { handleMessage(JSON.parse(e.data)); } catch (err) {}
+  });
+}
+
+function send(msg) {
+  fetch('/api', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(msg)
+  }).catch(() => {});
+}
+
+function handleMessage(data) {
+  switch (data.type) {
+    case 'rack_status': {
+      /* Detect instrument change on active detail channel */
+      const prevType = (activeDetail >= 0 && rackState.slots[activeDetail])
+                       ? rackState.slots[activeDetail].type : null;
+      rackState.slots = data.slots;
+      rackState.master_volume = data.master_volume;
+      rackState.midi_device = data.midi_device;
+      rackState.audio_backend = data.audio_backend;
+      rackState.local_mute = data.local_mute;
+      rackState.osc_port = data.osc_port;
+      rackState.mcast_active = data.mcast_active;
+      rackState.mcast_group = data.mcast_group;
+      rackState.bus_active = data.bus_active;
+      rackState.bus_slot = data.bus_slot;
+      rackState.sse_clients = data.sse_clients;
+      rackState.period_size = data.period_size;
+      rackState.sample_rate = data.sample_rate;
+      rackState.audio_device = data.audio_device;
+      rackState.cpu_load = data.cpu_load;
+      rackState.version = data.version;
+      updateRack();
+      updateTopBar();
+
+      /* Track init state — need both rack_status and rack_types before opening detail */
+      _gotRackStatus = true;
+      _initFocusCh = (typeof data.focused_ch === 'number') ? data.focused_ch : 0;
+      if (!_initDone && _gotRackTypes) {
+        _initDone = true;
+        openDetail(_initFocusCh);
+      }
+
+      /* Follow server focused channel (don't re-trigger if we set it) */
+      if (_initDone && typeof data.focused_ch === 'number' && data.focused_ch !== activeDetail) {
+        openDetail(data.focused_ch);
+      }
+
+      /* Re-render detail pane if instrument type changed */
+      if (activeDetail >= 0) {
+        const newType = rackState.slots[activeDetail] ? rackState.slots[activeDetail].type : null;
+        if (newType !== prevType) {
+          send({ type: 'ch_status', channel: activeDetail });
+          renderDetailPane();
+        }
+      }
+      break;
+    }
+    case 'rack_types':
+      instrumentTypes = data.types;
+      updateTypeDropdowns();
+      _gotRackTypes = true;
+      if (!_initDone && _gotRackStatus) {
+        _initDone = true;
+        openDetail(_initFocusCh);
+      }
+      break;
+    case 'midi_devices':
+      midiDevices = data.devices;
+      updateMidiDropdown();
+      break;
+    case 'ch_status':
+      if (activeDetail >= 0) {
+        channelStates[activeDetail] = data;
+        updateDetail();
+        updateSeqDisplay(data);
+      }
+      break;
+    case 'midi_events':
+      if (data.events) {
+        for (const ev of data.events) {
+          const [status, d1, d2] = ev;
+          const type = status & 0xF0;
+          /* Track held notes for keyboard highlight */
+          if (type === 0x90 && d2 > 0) pressedKeys.add(d1);
+          else if (type === 0x80 || (type === 0x90 && d2 === 0)) pressedKeys.delete(d1);
+        }
+        updateKeyHighlights();
+        updateMidiMonitor(data.events);
+      }
+      break;
+  }
+}
+
+// ── Render Rack ──────────────────────────────────────────────────
+
+function renderRack() {
+  const rack = document.getElementById('rack');
+  rack.innerHTML = '';
+  for (let ch = 0; ch < 16; ch++) {
+    const strip = document.createElement('div');
+    strip.className = 'ch-strip';
+    strip.id = `ch-${ch}`;
+    strip.dataset.ch = ch;
+
+    strip.innerHTML = `
+      <div class="ch-header">
+        <span class="ch-num">CH ${ch + 1}</span>
+        <div class="ch-buttons">
+          <button class="ch-btn active-indicator" id="act-${ch}" title="Activity">&#9654;</button>
+          <button class="ch-btn" id="mute-${ch}" title="Mute">M</button>
+          <button class="ch-btn" id="solo-${ch}" title="Solo">S</button>
+        </div>
+      </div>
+      <select class="ch-type-select" id="type-${ch}">
+        <option value="">— none —</option>
+      </select>
+      <div class="ch-preset" id="preset-info-${ch}">
+        <span class="name"></span>
+        <span class="num"></span>
+      </div>
+      <div class="ch-vol-bar" id="volbar-${ch}">
+        <div class="ch-vol-fill" id="volfill-${ch}" style="width:100%"></div>
+      </div>
+      <div class="ch-vol-val" id="volval-${ch}">1.00</div>
+      <div class="ch-activity">
+        <div class="meter" id="meter-${ch}">${'<div class="meter-dot"></div>'.repeat(16)}</div>
+        <span id="voices-${ch}">0/16</span>
+      </div>
+    `;
+
+    // Click strip to focus channel
+    strip.addEventListener('click', (e) => {
+      if (e.target.tagName === 'SELECT' || e.target.tagName === 'BUTTON' || e.target.closest('.ch-vol-bar')) return;
+      send({type:'focus_ch', channel:ch});
+      if (_mode === 'grid') {
+        /* In grid mode, navigate parent shell to miniwave (detail) view */
+        try { window.parent.nav('miniwave'); } catch(err) {}
+      } else {
+        openDetail(ch);
+      }
+    });
+
+    // Mute button
+    strip.querySelector(`#mute-${ch}`).addEventListener('click', (e) => {
+      e.stopPropagation();
+      const slot = rackState.slots[ch];
+      send({ type: 'slot_mute', channel: ch, value: slot.mute ? 0 : 1 });
+    });
+
+    // Solo button
+    strip.querySelector(`#solo-${ch}`).addEventListener('click', (e) => {
+      e.stopPropagation();
+      const slot = rackState.slots[ch];
+      send({ type: 'slot_solo', channel: ch, value: slot.solo ? 0 : 1 });
+    });
+
+    // Type select
+    strip.querySelector(`#type-${ch}`).addEventListener('change', (e) => {
+      e.stopPropagation();
+      const val = e.target.value;
+      if (val === '') {
+        send({ type: 'slot_clear', channel: ch });
+      } else {
+        send({ type: 'slot_set', channel: ch, instrument: val });
+      }
+    });
+
+    // Volume bar drag
+    setupVolBar(strip.querySelector(`#volbar-${ch}`), ch);
+
+    rack.appendChild(strip);
+  }
+  updateTypeDropdowns();
+}
+
+function setupVolBar(bar, ch) {
+  let dragging = false;
+
+  function setVol(e) {
+    const rect = bar.getBoundingClientRect();
+    let x = (e.clientX || e.touches[0].clientX) - rect.left;
+    let val = Math.max(0, Math.min(1, x / rect.width));
+    val = Math.round(val * 100) / 100;
+    send({ type: 'slot_volume', channel: ch, value: val });
+  }
+
+  bar.addEventListener('mousedown', (e) => { e.stopPropagation(); dragging = true; setVol(e); });
+  bar.addEventListener('touchstart', (e) => { e.stopPropagation(); dragging = true; setVol(e); }, { passive: true });
+  window.addEventListener('mousemove', (e) => { if (dragging) setVol(e); });
+  window.addEventListener('touchmove', (e) => { if (dragging) setVol(e); }, { passive: true });
+  window.addEventListener('mouseup', () => { dragging = false; });
+  window.addEventListener('touchend', () => { dragging = false; });
+}
+
+function updateRack() {
+  for (let ch = 0; ch < 16; ch++) {
+    const slot = rackState.slots[ch];
+    if (!slot) continue;
+    const strip = document.getElementById(`ch-${ch}`);
+    if (!strip) continue;
+
+    // Type dropdown
+    const sel = document.getElementById(`type-${ch}`);
+    if (sel && document.activeElement !== sel) {
+      sel.value = slot.active ? slot.type : '';
+    }
+
+    // Mute/Solo buttons
+    const muteBtn = document.getElementById(`mute-${ch}`);
+    const soloBtn = document.getElementById(`solo-${ch}`);
+    if (muteBtn) muteBtn.className = `ch-btn${slot.mute ? ' mute-on' : ''}`;
+    if (soloBtn) soloBtn.className = `ch-btn${slot.solo ? ' solo-on' : ''}`;
+
+    // Volume bar
+    const fill = document.getElementById(`volfill-${ch}`);
+    const vval = document.getElementById(`volval-${ch}`);
+    if (fill) fill.style.width = (slot.volume * 100) + '%';
+    if (vval) vval.textContent = slot.volume.toFixed(2);
+
+    // Preset info + activity from channel state
+    const presetInfo = document.getElementById(`preset-info-${ch}`);
+    const actInd = document.getElementById(`act-${ch}`);
+    const voicesEl = document.getElementById(`voices-${ch}`);
+    const meterEl = document.getElementById(`meter-${ch}`);
+
+    const cs = channelStates[ch];
+    if (cs && slot.active) {
+      if (presetInfo) {
+        presetInfo.querySelector('.name').textContent = cs.preset_name || '';
+        presetInfo.querySelector('.num').textContent = cs.preset_index !== undefined ? String(cs.preset_index).padStart(3, '0') : '';
+      }
+      if (actInd) actInd.className = `ch-btn active-indicator${cs.active_voices > 0 ? ' sounding' : ''}`;
+      if (voicesEl) voicesEl.textContent = `${cs.active_voices || 0}/16`;
+      if (meterEl) {
+        const dots = meterEl.children;
+        for (let d = 0; d < dots.length; d++) {
+          dots[d].className = `meter-dot${d < (cs.active_voices || 0) ? ' on' : ''}`;
+        }
+      }
+    } else {
+      if (presetInfo) {
+        presetInfo.querySelector('.name').textContent = '';
+        presetInfo.querySelector('.num').textContent = '';
+      }
+      if (actInd) actInd.className = 'ch-btn active-indicator';
+      if (voicesEl) voicesEl.textContent = '0/16';
+      if (meterEl) {
+        const dots = meterEl.children;
+        for (let d = 0; d < dots.length; d++) dots[d].className = 'meter-dot';
+      }
+    }
+
+    // Active detail highlight
+    strip.classList.toggle('active-detail', ch === activeDetail);
+  }
+}
+
+function updateTypeDropdowns() {
+  for (let ch = 0; ch < 16; ch++) {
+    const sel = document.getElementById(`type-${ch}`);
+    if (!sel) continue;
+    const curVal = sel.value;
+    sel.innerHTML = '<option value="">— none —</option>';
+    for (const t of instrumentTypes) {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      sel.appendChild(opt);
+    }
+    sel.value = curVal;
+  }
+}
+
+// ── Top Bar Updates ──────────────────────────────────────────────
+
+function updateTopBar() {
+  const verEl = document.getElementById('f-version');
+  if (verEl && rackState.version) verEl.textContent = 'v' + rackState.version;
+
+  /* Update instrument name in local header */
+  const instEl = document.getElementById('inst-name');
+  if (instEl && activeDetail >= 0 && rackState.slots && rackState.slots[activeDetail]) {
+    const s = rackState.slots[activeDetail];
+    instEl.textContent = s.active ? 'CH ' + (activeDetail+1) + ' — ' + s.type : 'CH ' + (activeDetail+1);
+  }
+}
+
+/* Web MIDI + dropdown handled by SPA shell */
+function updateMidiDropdown() {}
+
+// Master volume
+/* Master/MIDI handled by SPA shell */
+{ const mv = document.getElementById('master-vol');
+  if (mv) mv.addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    const mvl = document.getElementById('master-val');
+    if (mvl) mvl.textContent = val.toFixed(2);
+    send({ type: 'master_volume', value: val });
+  });
+}
+
+// ── Detail Pane ──────────────────────────────────────────────────
+
+function openDetail(ch) {
+  activeDetail = ch;
+  const lbl = document.getElementById('ch-label');
+  if (lbl) lbl.textContent = 'CH ' + (ch + 1);
+  channelStates[ch] = channelStates[ch] || null;
+  send({ type: 'ch_status', channel: ch });
+  /* Tell server to push detail updates for this channel via SSE */
+  fetch('/api/detail', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel: ch })
+  }).catch(() => {});
+  /* Broadcast focused channel — other clients follow */
+  send({ type: 'focus_ch', channel: ch });
+
+  fetchSpec(ch).then(() => {
+    const detail = document.getElementById('detail');
+    if (detail) detail.classList.add('open');
+    renderDetailPane();
+    renderKeyboard(ch);
+    updateRack();
+    /* Update URL without reload */
+    history.replaceState(null, '', '?ch=' + ch);
+  });
+}
+
+function closeDetail() {
+  send({ type: 'detail_close' });
+  /* Tell server to stop detail polling */
+  fetch('/api/detail', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel: -1 })
+  }).catch(() => {});
+  activeDetail = -1;
+  document.getElementById('detail')?.classList.remove('open');
+  updateRack();
+}
+
+async function renderDetailPane() {
+  if (activeDetail < 0) return;
+  const ch = activeDetail;
+  const slot = rackState.slots[ch];
+  const detail = document.getElementById('detail');
+
+  /* Instrument types used for prev/next cycling */
+
+  detail.innerHTML = `
+    <div class="detail-header">
+      <div class="detail-nav">
+        <button class="detail-nav-btn" id="detail-prev" title="Previous channel">&#9666;</button>
+        <span class="detail-ch-label">CH ${ch + 1}</span>
+        <button class="detail-nav-btn" id="detail-next" title="Next channel">&#9656;</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+        <button class="detail-nav-btn" id="type-prev" title="Previous instrument">&#9666;</button>
+        <span id="type-label" style="font-size:12px;font-weight:bold;color:var(--accent);min-width:100px;text-align:center">${slot.active ? slot.type : '—'}</span>
+        <button class="detail-nav-btn" id="type-next" title="Next instrument">&#9656;</button>
+      </div>
+    </div>
+    <div class="detail-body" id="detail-body"></div>
+  `;
+
+  document.getElementById('detail-prev')?.addEventListener('click', () => {
+    openDetail((activeDetail + 15) % 16);
+  });
+  document.getElementById('detail-next')?.addEventListener('click', () => {
+    openDetail((activeDetail + 1) % 16);
+  });
+  document.getElementById('type-prev')?.addEventListener('click', () => {
+    const curIdx = slot.active ? instrumentTypes.indexOf(slot.type) : -1;
+    const nextIdx = (curIdx <= 0) ? instrumentTypes.length - 1 : curIdx - 1;
+    send({ type: 'slot_set', channel: ch, instrument: instrumentTypes[nextIdx] });
+    setTimeout(() => { send({ type: 'ch_status', channel: ch }); renderDetailPane(); }, 100);
+  });
+  document.getElementById('type-next')?.addEventListener('click', () => {
+    const curIdx = slot.active ? instrumentTypes.indexOf(slot.type) : -1;
+    const nextIdx = (curIdx < 0 || curIdx >= instrumentTypes.length - 1) ? 0 : curIdx + 1;
+    send({ type: 'slot_set', channel: ch, instrument: instrumentTypes[nextIdx] });
+    setTimeout(() => { send({ type: 'ch_status', channel: ch }); renderDetailPane(); }, 100);
+  });
+  /* MIDI handled by SPA shell */
+
+  if (slot.active && slot.type) {
+    await renderGenericInstrument(ch, slot.type);
+    renderSeqSection(ch);
+    renderPatchSection(document.getElementById('detail-body'), ch, slot.type);
+  } else if (!slot.active) {
+    const db = document.getElementById('detail-body');
+    if (db) db.innerHTML = '<div style="color:var(--dim);text-align:center;padding:40px">No instrument loaded.<br>Select one from the dropdown.</div>';
+  }
+}
+
+function renderSeqSection(ch) {
+  const body = document.getElementById('detail-body');
+  if (!body) return;
+  const div = document.createElement('div');
+  div.className = 'seq-section';
+  div.innerHTML = `<div class="seq-toggle" id="seq-toggle" title="Enable/disable keyseq"></div>
+    <span style="color:#8866cc;font-size:10px;text-transform:uppercase;letter-spacing:0.5px">seq</span>
+    <span class="seq-dsl" id="seq-dsl-text" title="Click to edit in KeySeq">—</span>`;
+  body.appendChild(div);
+
+  document.getElementById('seq-toggle')?.addEventListener('click', () => {
+    const tog = document.getElementById('seq-toggle');
+    const enabling = !tog.classList.contains('on');
+    send({ type: 'keyseq_enable', channel: ch, enabled: enabling ? 1 : 0 });
+    tog.classList.toggle('on', enabling);
+  });
+
+  document.getElementById('seq-dsl-text')?.addEventListener('click', () => {
+    window.location = '/keyseq-test';
+  });
+
+  /* Fetch current state */
+  fetchKeyseqStatus(ch);
+}
+
+function fetchKeyseqStatus(ch) {
+  fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({type:'keyseq_status', channel:ch})
+  }).then(r => r.json()).then(data => {
+    const tog = document.getElementById('seq-toggle');
+    const dsl = document.getElementById('seq-dsl-text');
+    if (tog) tog.classList.toggle('on', !!data.enabled);
+    if (dsl) dsl.textContent = data.dsl || '—';
+  }).catch(() => {});
+}
+
+function updateSeqDisplay(data) {
+  const tog = document.getElementById('seq-toggle');
+  const dsl = document.getElementById('seq-dsl-text');
+  if (tog && data.keyseq_enabled !== undefined) tog.classList.toggle('on', !!data.keyseq_enabled);
+  if (dsl && data.keyseq_dsl !== undefined) dsl.textContent = data.keyseq_dsl || '—';
+}
+
+// ── Patch System (server-backed) ─────────────────────────────────
+
+let cachedPatches = []; /* [{name, type, has_keyseq, has_seq}] */
+
+function fetchPatches(instrumentType) {
+  const payload = { type: 'patch_list' };
+  if (instrumentType) payload.instrument = instrumentType;
+  return fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(data => {
+    cachedPatches = data.patches || [];
+    return cachedPatches;
+  }).catch(() => []);
+}
+
+function nextPatchName(patches, instrumentType) {
+  const prefix = instrumentType ? instrumentType.split('-')[0] : 'Patch';
+  let n = 1;
+  const names = new Set(patches.map(p => p.name));
+  while (names.has(`${prefix} ${n}`)) n++;
+  return `${prefix} ${n}`;
+}
+
+function renderPatchSection(container, ch, instrumentType) {
+  const sec = document.createElement('div');
+  sec.className = 'preset-section';
+  sec.id = 'patch-section';
+  sec.innerHTML = `
+    <h3>Patches
+      <button class="reset-btn" id="patch-save-btn" style="margin-left:auto;padding:2px 8px;font-size:13px;font-weight:bold" title="Save current state as patch">+</button>
+    </h3>
+    <div class="preset-lcd" style="margin-bottom:8px">
+      <input type="text" id="patch-name-input" value="" placeholder="patch name"
+        style="background:transparent;border:none;color:var(--lcd-fg);font-family:inherit;font-size:14px;text-shadow:0 0 8px var(--lcd-fg);width:100%;outline:none">
+    </div>
+    <div class="preset-grid" id="patch-grid" style="min-height:20px"></div>
+  `;
+  container.appendChild(sec);
+
+  fetchPatches(instrumentType).then(patches => {
+    const grid = document.getElementById('patch-grid');
+    const nameInput = document.getElementById('patch-name-input');
+    if (!grid) return;
+
+    /* Set default name for next save */
+    if (nameInput) nameInput.value = nextPatchName(patches, instrumentType);
+
+    if (!patches.length) {
+      grid.innerHTML = '<span style="color:var(--dim);font-size:11px">no patches — hit + to save</span>';
+      return;
+    }
+    grid.innerHTML = '';
+    patches.forEach(p => {
+      const btn = document.createElement('button');
+      btn.className = 'preset-btn';
+      let label = p.name;
+      if (p.has_keyseq) label += ' \u266B';
+      if (p.has_seq) label += ' \u2192';
+      btn.textContent = label;
+      btn.title = `${p.name}\nRight-click: rename / delete`;
+      btn.addEventListener('click', () => {
+        fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ type: 'patch_load', channel: ch, name: p.name })
+        }).then(r => r.json()).then(data => {
+          if (data.error) return;
+          applyPatchResponse(ch, data);
+          /* Update name field to loaded patch */
+          const ni = document.getElementById('patch-name-input');
+          if (ni) ni.value = p.name;
+        }).catch(() => {});
+      });
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        patchContextMenu(ch, p, instrumentType);
+      });
+      grid.appendChild(btn);
+    });
+  });
+
+  document.getElementById('patch-save-btn')?.addEventListener('click', () => {
+    const nameInput = document.getElementById('patch-name-input');
+    const name = (nameInput ? nameInput.value.trim() : '') || 'Patch';
+    fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ type: 'patch_save', channel: ch, name })
+    }).then(r => r.json()).then(data => {
+      if (data.error) { alert(data.error); return; }
+      /* Refresh patch grid */
+      fetchPatches(instrumentType).then(patches => {
+        const grid = document.getElementById('patch-grid');
+        if (grid) { grid.innerHTML = ''; renderPatchButtons(grid, ch, patches, instrumentType); }
+        if (nameInput) nameInput.value = nextPatchName(patches, instrumentType);
+      });
+    }).catch(() => {});
+  });
+}
+
+function renderPatchButtons(grid, ch, patches, instrumentType) {
+  if (!patches.length) {
+    grid.innerHTML = '<span style="color:var(--dim);font-size:11px">no patches — hit + to save</span>';
+    return;
+  }
+  patches.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    let label = p.name;
+    if (p.has_keyseq) label += ' \u266B';
+    if (p.has_seq) label += ' \u2192';
+    btn.textContent = label;
+    btn.title = `${p.name}\nRight-click: rename / delete`;
+    btn.addEventListener('click', () => {
+      fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ type: 'patch_load', channel: ch, name: p.name })
+      }).then(r => r.json()).then(data => {
+        if (data.error) return;
+        applyPatchResponse(ch, data);
+        const ni = document.getElementById('patch-name-input');
+        if (ni) ni.value = p.name;
+      }).catch(() => {});
+    });
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      patchContextMenu(ch, p, instrumentType);
+    });
+    grid.appendChild(btn);
+  });
+}
+
+function patchContextMenu(ch, patch, instrumentType) {
+  const action = prompt(`"${patch.name}"\n\nr = rename\nd = delete`);
+  if (!action) return;
+  if (action.toLowerCase() === 'd') {
+    if (!confirm(`Delete "${patch.name}"?`)) return;
+    fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ type: 'patch_delete', name: patch.name })
+    }).then(() => {
+      fetchPatches(instrumentType).then(patches => {
+        const grid = document.getElementById('patch-grid');
+        if (grid) { grid.innerHTML = ''; renderPatchButtons(grid, ch, patches, instrumentType); }
+      });
+    }).catch(() => {});
+  } else if (action.toLowerCase() === 'r') {
+    const newName = prompt('New name:', patch.name);
+    if (!newName || !newName.trim() || newName.trim() === patch.name) return;
+    fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ type: 'patch_rename', name: patch.name, new_name: newName.trim() })
+    }).then(() => {
+      fetchPatches(instrumentType).then(patches => {
+        const grid = document.getElementById('patch-grid');
+        if (grid) { grid.innerHTML = ''; renderPatchButtons(grid, ch, patches, instrumentType); }
+        const ni = document.getElementById('patch-name-input');
+        if (ni && ni.value === patch.name) ni.value = newName.trim();
+      });
+    }).catch(() => {});
+  }
+}
+
+function applyPatchResponse(ch, data) {
+  /* Update instrument type selector */
+  const typeLabel = document.getElementById('type-label');
+  if (typeLabel && data.instrument_type) typeLabel.textContent = data.instrument_type;
+
+  /* Normalize: if response has top-level param keys (not nested params object),
+     build the params object from known schema keys */
+  if (!data.params && data.instrument_type && instSchemas[data.instrument_type]) {
+    const params = {};
+    instSchemas[data.instrument_type].params.forEach(p => {
+      if (data[p.name] !== undefined) params[p.name] = data[p.name];
+    });
+    data.params = params;
+  }
+
+  /* Store as channel state so updateDetail + re-render use it */
+  channelStates[ch] = channelStates[ch] || {};
+  Object.assign(channelStates[ch], data);
+
+  /* If instrument type changed, full re-render */
+  const slot = rackState.slots[ch];
+  if (slot && data.instrument_type && slot.type !== data.instrument_type) {
+    slot.type = data.instrument_type;
+    slot.active = 1;
+    renderDetailPane();
+    return;
+  }
+
+  /* Otherwise just update controls in-place */
+  updateDetail();
+  updateSeqDisplay(data);
+
+  /* Update LCD if present */
+  const lcdName = document.getElementById('lcd-name');
+  if (lcdName && data.preset_name) lcdName.textContent = data.preset_name;
+  const lcdNum = document.getElementById('lcd-num');
+  if (lcdNum && data.preset_index !== undefined) lcdNum.textContent = String(data.preset_index).padStart(2, '0');
+}
+
+// ── Generic Instrument Renderer ──────────────────────────────────
+
+let _activeSpec = null; /* last keyseq_spec response for active detail */
+
+async function renderGenericInstrument(ch, instrumentType) {
+  const body = document.getElementById('detail-body');
+  if (!body) return;
+
+  /* Fetch full spec with flat param values for this channel */
+  let spec;
+  try {
+    const r = await fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ type: 'keyseq_spec', channel: ch }) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    spec = await r.json();
+  } catch(e) { body.innerHTML = `<div style="color:var(--accent)">Failed to load spec: ${e.message}</div>`; return; }
+
+  _activeSpec = spec;
+  const instSchema = (spec.instruments && spec.instruments[instrumentType]) ? spec.instruments[instrumentType] : {};
+  const schema = instSchema.params || [];
+  const envelopes = instSchema.envelopes || [];
+  if (!schema.length) { body.innerHTML = '<div style="color:var(--dim)">No params</div>'; return; }
+
+  /* Collect envelope param keys to exclude from slider grids */
+  const envKeys = new Set();
+  envelopes.forEach(env => { ['attack','decay','sustain','release'].forEach(k => { if (env[k]) envKeys.add(env[k]); }); });
+
+  /* Group params (excluding envelope params) */
+  const groups = {};
+  const ungrouped = [];
+  schema.forEach(p => {
+    if (envKeys.has(p.name)) return;
+    if (p.group) {
+      (groups[p.group] = groups[p.group] || []).push(p);
+    } else {
+      ungrouped.push(p);
+    }
+  });
+
+  /* Build HTML — two column layout: params left, envelopes right */
+  let html = '<div class="detail-columns"><div class="detail-col-left">';
+  const groupNames = Object.keys(groups);
+  if (ungrouped.length) {
+    html += `<div class="params-section"><h3>Parameters <a href="javascript:void(0)" id="json-link" style="color:var(--dim);font-size:9px;font-weight:normal;margin-left:auto;text-decoration:none">json</a></h3><div class="params-grid" id="gp-ungrouped"></div></div>`;
+  }
+  groupNames.forEach(g => {
+    html += `<div class="params-section"><h3>${g}</h3><div class="params-grid" id="gp-${g}"></div></div>`;
+  });
+  html += `<div class="detail-volume"><label>Vol</label><input type="range" id="detail-vol" min="0" max="1" step="0.01" value="${spec.volume !== undefined ? spec.volume : 1}"><span class="val" id="detail-vol-val">${(spec.volume !== undefined ? spec.volume : 1).toFixed(2)}</span></div>`;
+  html += '</div><div class="detail-col-right">';
+  envelopes.forEach((env, i) => {
+    html += `<div class="params-section"><h3>${env.name} envelope</h3><canvas class="adsr-canvas" id="adsr-${i}" width="380" height="120"></canvas><div class="adsr-values" id="adsr-vals-${i}"><span></span><span></span><span></span><span></span></div></div>`;
+  });
+  html += '</div></div>';
+  body.innerHTML = html;
+
+  /* JSON inspection link */
+  const jsonLink = document.getElementById('json-link');
+  if (jsonLink) jsonLink.addEventListener('click', () => {
+    fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ type: 'keyseq_spec', channel: ch })
+    }).then(r => r.json()).then(d => {
+      const w = window.open('', '_blank');
+      w.document.write('<pre style="background:#111;color:#0f0;padding:16px;font-size:12px">' + JSON.stringify(d, null, 2).replace(/</g, '&lt;') + '</pre>');
+    }).catch(() => {});
+  });
+
+  /* Render param controls */
+  if (ungrouped.length) {
+    const grid = document.getElementById('gp-ungrouped');
+    renderSpecControls(grid, ch, ungrouped, spec, 'gp');
+  }
+  groupNames.forEach(g => {
+    const grid = document.getElementById('gp-' + g);
+    renderSpecControls(grid, ch, groups[g], spec, 'gp');
+  });
+
+  /* ADSR canvases */
+  const paramLookup = {};
+  schema.forEach(p => { paramLookup[p.name] = p; });
+  envelopes.forEach((env, i) => {
+    setupADSR(`adsr-${i}`, `adsr-vals-${i}`, ch, env, paramLookup, spec);
+  });
+
+  /* Additive expression editor (mode=5 Expression) */
+  if (instrumentType === 'additive') {
+    renderAdditiveExprEditor(body, ch, spec);
+  }
+
+  /* Volume */
+  document.getElementById('detail-vol')?.addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    const dvv = document.getElementById('detail-vol-val');
+    if (dvv) dvv.textContent = val.toFixed(2);
+    send({ type: 'ch', channel: ch, path: '/volume', fargs: [val] });
+  });
+
+  /* Keyboard */
+  renderKeyboard(ch);
+}
+
+function renderAdditiveExprEditor(body, ch, spec) {
+  const sec = document.createElement('div');
+  sec.className = 'params-section';
+  sec.id = 'expr-editor';
+  sec.style.display = (spec.mode === 5) ? '' : 'none';
+  sec.innerHTML = `
+    <h3>Expression Editor <span style="color:var(--dim);font-size:9px;font-weight:normal;margin-left:4px">mode=Expression only &bull; vars: n (harmonic 1-based), root (total harmonics)</span></h3>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="color:var(--good);font-size:10px;width:36px;text-align:right">amp</span>
+        <input type="text" id="expr-amp" value="${spec.amp_expr || '1/n'}" placeholder="1/n" style="flex:1;font-size:12px;padding:4px 6px">
+        <span class="expr-valid" id="expr-amp-ok" style="font-size:10px"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="color:var(--good);font-size:10px;width:36px;text-align:right">freq</span>
+        <input type="text" id="expr-freq" value="${spec.freq_expr || 'n'}" placeholder="n" style="flex:1;font-size:12px;padding:4px 6px">
+        <span class="expr-valid" id="expr-freq-ok" style="font-size:10px"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="color:var(--good);font-size:10px;width:36px;text-align:right">phase</span>
+        <input type="text" id="expr-phase" value="${spec.phase_expr || '0'}" placeholder="0" style="flex:1;font-size:12px;padding:4px 6px">
+        <span class="expr-valid" id="expr-phase-ok" style="font-size:10px"></span>
+      </div>
+    </div>
+  `;
+  body.appendChild(sec);
+
+  let exprTimer = null;
+  function sendExprs() {
+    clearTimeout(exprTimer);
+    exprTimer = setTimeout(() => {
+      const amp = document.getElementById('expr-amp').value.trim();
+      const freq = document.getElementById('expr-freq').value.trim();
+      const phase = document.getElementById('expr-phase').value.trim();
+      fetch('/api', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ type:'additive_expr', channel:ch, amp, freq, phase })
+      }).then(r => r.json()).then(data => {
+        if (data.error) return;
+        const ok = v => v ? '<span style="color:var(--good)">ok</span>' : '<span style="color:var(--accent)">err</span>';
+        const eao = document.getElementById('expr-amp-ok');
+        if (eao) eao.innerHTML = ok(data.amp_valid);
+        const efo = document.getElementById('expr-freq-ok');
+        if (efo) efo.innerHTML = ok(data.freq_valid);
+        const epo = document.getElementById('expr-phase-ok');
+        if (epo) epo.innerHTML = ok(data.phase_valid);
+      }).catch(() => {});
+    }, 200);
+  }
+
+  ['expr-amp','expr-freq','expr-phase'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', sendExprs);
+  });
+
+  /* Show/hide based on mode selector changes */
+  const modeSel = document.getElementById('gp-sel-mode');
+  if (modeSel) {
+    modeSel.addEventListener('change', () => {
+      sec.style.display = (parseInt(modeSel.value) === 5) ? '' : 'none';
+    });
+  }
+}
+
+function renderSpecControls(container, ch, params, spec, pfx) {
+  params.forEach(p => {
+    const val = spec[p.name] !== undefined ? spec[p.name] : (p.default !== undefined ? p.default : p.min);
+    const div = document.createElement('div');
+    div.className = 'param-control';
+
+    if (p.type === 'bool') {
+      div.innerHTML = `<div class="param-label"><span class="name">${p.name}</span>
+        <button class="reset-btn" id="${pfx}-btn-${p.name}" style="background:${val ? 'var(--accent)' : 'var(--card)'}">${val ? 'ON' : 'OFF'}</button></div>`;
+      container.appendChild(div);
+      div.querySelector('button').addEventListener('click', () => {
+        const btn = document.getElementById(`${pfx}-btn-${p.name}`);
+        const nv = btn.textContent === 'ON' ? 0 : 1;
+        btn.textContent = nv ? 'ON' : 'OFF';
+        btn.style.background = nv ? 'var(--accent)' : 'var(--card)';
+        send({ type: 'ch', channel: ch, path: `/param/${p.name}`, fargs: [nv] });
+      });
+    } else if (p.type === 'int' && p.labels) {
+      let opts = '';
+      p.labels.forEach((l, i) => { opts += `<option value="${i}"${i === Math.round(val) ? ' selected' : ''}>${l}</option>`; });
+      div.innerHTML = `<div class="param-label"><span class="name">${p.name}</span>
+        <select class="sleek-select" id="${pfx}-sel-${p.name}" style="flex:1;min-width:0;font-size:11px">${opts}</select></div>`;
+      container.appendChild(div);
+      div.querySelector('select').addEventListener('change', (e) => {
+        send({ type: 'ch', channel: ch, path: `/param/${p.name}`, fargs: [parseInt(e.target.value)] });
+      });
+    } else if (p.scale === 'log') {
+      const sv = logToSlider(val, p.min, p.max);
+      div.innerHTML = `<div class="param-label"><span class="name">${p.name}</span><span class="val" id="${pfx}-pval-${p.name}">${fmtVal({log:true}, val)}</span></div>
+        <input type="range" class="param-slider" id="${pfx}-pslider-${p.name}" min="0" max="1" step="0.001" value="${sv}">`;
+      container.appendChild(div);
+      div.querySelector('input').addEventListener('input', (e) => {
+        const v = sliderToLog(parseFloat(e.target.value), p.min, p.max);
+        const pvEl = document.getElementById(`${pfx}-pval-${p.name}`);
+        if (pvEl) pvEl.textContent = fmtVal({log:true}, v);
+        send({ type: 'ch', channel: ch, path: `/param/${p.name}`, fargs: [v] });
+      });
+    } else {
+      /* int or float slider */
+      const step = p.type === 'int' ? 1 : (p.max - p.min) / 200;
+      div.innerHTML = `<div class="param-label"><span class="name">${p.name}</span><span class="val" id="${pfx}-pval-${p.name}">${fmtVal(p, val)}</span></div>
+        <input type="range" class="param-slider" id="${pfx}-pslider-${p.name}" min="${p.min}" max="${p.max}" step="${step}" value="${val}">`;
+      container.appendChild(div);
+      div.querySelector('input').addEventListener('input', (e) => {
+        const v = p.type === 'int' ? parseInt(e.target.value) : parseFloat(e.target.value);
+        const pvEl = document.getElementById(`${pfx}-pval-${p.name}`);
+        if (pvEl) pvEl.textContent = fmtVal(p, v);
+        send({ type: 'ch', channel: ch, path: `/param/${p.name}`, fargs: [v] });
+      });
+    }
+  });
+}
+
+
+// ── ADSR Canvas ─────────────────────────────────────────────────
+
+function setupADSR(canvasId, valsId, ch, env, paramLookup, spec) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = 12, nodeR = 6;
+
+  const ap = paramLookup[env.attack] || { min: 0.001, max: 5 };
+  const dp = paramLookup[env.decay] || { min: 0.001, max: 5 };
+  const sp = paramLookup[env.sustain] || { min: 0, max: 1 };
+  const rp = paramLookup[env.release] || { min: 0.001, max: 5 };
+  const isInt = ap.type === 'int';
+
+  /* Log scale for time params: val → 0-1 position */
+  function tToX(val, p) {
+    if (isInt) return (val - p.min) / (p.max - p.min);
+    return Math.pow(Math.max(0, (val - p.min) / (p.max - p.min)), 0.35);
+  }
+  function xToT(x, p) {
+    if (isInt) return Math.round(p.min + x * (p.max - p.min));
+    return p.min + Math.pow(Math.max(0, x), 1/0.35) * (p.max - p.min);
+  }
+  function sToY(val) { return (val - sp.min) / (sp.max - sp.min); }
+  function yToS(y) { return sp.min + y * (sp.max - sp.min); }
+
+  let atk = spec[env.attack] !== undefined ? spec[env.attack] : ap.default || ap.min;
+  let dec = spec[env.decay] !== undefined ? spec[env.decay] : dp.default || dp.min;
+  let sus = spec[env.sustain] !== undefined ? spec[env.sustain] : sp.default || 0.5;
+  let rel = spec[env.release] !== undefined ? spec[env.release] : rp.default || rp.min;
+
+  function fmtT(v) { return isInt ? String(Math.round(v)) : v < 1 ? (v*1000).toFixed(0)+'ms' : v.toFixed(2)+'s'; }
+  function fmtS(v) { return isInt ? String(Math.round(v)) : v.toFixed(2); }
+
+  const segW = (W - pad * 2) / 4; /* 4 segments: A, D, sustain hold, R */
+
+  function getNodes() {
+    const x0 = pad, y0 = H - pad;
+    const xA = pad + tToX(atk, ap) * segW;
+    const yA = pad;
+    const xD = xA + tToX(dec, dp) * segW;
+    const yD = pad + (1 - sToY(sus)) * (H - pad * 2);
+    const xS = xD + segW; /* sustain hold segment */
+    const yS = yD;
+    const xR = xS + tToX(rel, rp) * segW;
+    const yR = H - pad;
+    return [{x:x0,y:y0},{x:xA,y:yA},{x:xD,y:yD},{x:xS,y:yS},{x:xR,y:yR}];
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    const nodes = getNodes();
+    /* Grid lines */
+    ctx.strokeStyle = '#1a1a2e';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) { const x = pad + i * segW; ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, H-pad); ctx.stroke(); }
+    /* Envelope path */
+    ctx.strokeStyle = '#00d4aa';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(nodes[0].x, nodes[0].y);
+    for (let i = 1; i < nodes.length; i++) ctx.lineTo(nodes[i].x, nodes[i].y);
+    ctx.stroke();
+    /* Fill */
+    ctx.fillStyle = 'rgba(0,212,170,0.08)';
+    ctx.beginPath();
+    ctx.moveTo(nodes[0].x, nodes[0].y);
+    for (let i = 1; i < nodes.length; i++) ctx.lineTo(nodes[i].x, nodes[i].y);
+    ctx.lineTo(nodes[nodes.length-1].x, H-pad);
+    ctx.lineTo(pad, H-pad);
+    ctx.fill();
+    /* Nodes (draggable: 1=A peak, 2=D/S corner, 4=R end) */
+    [1,2,4].forEach(i => {
+      if (i >= nodes.length) return;
+      ctx.beginPath();
+      ctx.arc(nodes[i].x, nodes[i].y, nodeR, 0, Math.PI*2);
+      ctx.fillStyle = dragNode === i ? '#fff' : '#00d4aa';
+      ctx.fill();
+    });
+    /* Value labels */
+    const vals = document.getElementById(valsId);
+    if (vals) vals.innerHTML = `<span>A: ${fmtT(atk)}</span><span>D: ${fmtT(dec)}</span><span>S: ${fmtS(sus)}</span><span>R: ${fmtT(rel)}</span>`;
+  }
+
+  let dragNode = -1;
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * W / rect.width, y: (cy - rect.top) * H / rect.height };
+  }
+  function findNode(pos) {
+    const nodes = getNodes();
+    for (const i of [1,2,4]) {
+      if (i >= nodes.length) continue;
+      const dx = pos.x - nodes[i].x, dy = pos.y - nodes[i].y;
+      if (dx*dx + dy*dy < (nodeR+4)*(nodeR+4)) return i;
+    }
+    return -1;
+  }
+  function onDown(e) { e.preventDefault(); dragNode = findNode(getMousePos(e)); if (dragNode >= 0) canvas.style.cursor = 'grabbing'; }
+  function onMove(e) {
+    if (dragNode < 0) { canvas.style.cursor = findNode(getMousePos(e)) >= 0 ? 'grab' : 'default'; return; }
+    e.preventDefault();
+    const pos = getMousePos(e);
+    if (dragNode === 1) {
+      atk = xToT(clamp((pos.x - pad) / segW, 0, 1), ap);
+      send({ type: 'ch', channel: ch, path: `/param/${env.attack}`, fargs: [atk] });
+    } else if (dragNode === 2) {
+      dec = xToT(clamp((pos.x - pad - tToX(atk,ap)*segW) / segW, 0, 1), dp);
+      sus = yToS(clamp(1 - (pos.y - pad) / (H - pad*2), 0, 1));
+      send({ type: 'ch', channel: ch, path: `/param/${env.decay}`, fargs: [dec] });
+      send({ type: 'ch', channel: ch, path: `/param/${env.sustain}`, fargs: [sus] });
+    } else if (dragNode === 4) {
+      const nodes = getNodes();
+      rel = xToT(clamp((pos.x - nodes[3].x) / segW, 0, 1), rp);
+      send({ type: 'ch', channel: ch, path: `/param/${env.release}`, fargs: [rel] });
+    }
+    draw();
+  }
+  function onUp() { dragNode = -1; canvas.style.cursor = 'default'; }
+
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, {passive:false});
+  canvas.addEventListener('touchmove', onMove, {passive:false});
+  window.addEventListener('touchend', onUp);
+
+  canvas._adsrUpdate = function(vals) {
+    if (dragNode >= 0) return;
+    if (vals[env.attack] !== undefined) atk = vals[env.attack];
+    if (vals[env.decay] !== undefined) dec = vals[env.decay];
+    if (vals[env.sustain] !== undefined) sus = vals[env.sustain];
+    if (vals[env.release] !== undefined) rel = vals[env.release];
+    draw();
+  };
+
+  draw();
+}
+
+// ── Virtual Keyboard ─────────────────────────────────────────────
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+function renderKeyboard(ch) {
+  const kb = document.getElementById('keyboard');
+  if (!kb) return;
+  kb.innerHTML = '';
+
+  // A0 (21) to C8 (108) = 88 keys (full piano)
+  const startNote = 21;
+  const endNote = 109;
+
+  // White keys
+  const whiteNotes = [];
+  for (let n = startNote; n < endNote; n++) {
+    const name = NOTE_NAMES[n % 12];
+    if (!name.includes('#')) whiteNotes.push(n);
+  }
+
+  const whiteWidth = 100 / whiteNotes.length;
+
+  // Place white keys
+  let whiteIdx = 0;
+  for (const n of whiteNotes) {
+    const key = document.createElement('div');
+    key.className = 'key white';
+    key.dataset.note = n;
+    key.style.width = whiteWidth + '%';
+    key.textContent = NOTE_NAMES[n % 12] + Math.floor(n / 12 - 1);
+    kb.appendChild(key);
+    whiteIdx++;
+  }
+
+  // Place black keys
+  whiteIdx = 0;
+  for (let i = 0; i < whiteNotes.length; i++) {
+    const n = whiteNotes[i];
+    const nextNote = n + 1;
+    if (nextNote < endNote && NOTE_NAMES[nextNote % 12].includes('#')) {
+      const key = document.createElement('div');
+      key.className = 'key black';
+      key.dataset.note = nextNote;
+      const leftPct = (i + 1) * whiteWidth - (whiteWidth * 0.3);
+      key.style.left = leftPct + '%';
+      key.textContent = NOTE_NAMES[nextNote % 12] + Math.floor(nextNote / 12 - 1);
+      kb.appendChild(key);
+    }
+  }
+
+  // Event handlers
+  let isDown = false;
+
+  function noteOn(n) {
+    if (pressedKeys.has(n)) return;
+    pressedKeys.add(n);
+    send({ type: 'note_on', channel: ch, note: n, velocity: 100 });
+    updateKeyHighlights();
+    const display = document.getElementById('note-display');
+    if (display) display.textContent = NOTE_NAMES[n % 12] + Math.floor(n / 12 - 1);
+  }
+
+  function noteOff(n) {
+    if (!pressedKeys.has(n)) return;
+    pressedKeys.delete(n);
+    send({ type: 'note_off', channel: ch, note: n });
+    updateKeyHighlights();
+    const display = document.getElementById('note-display');
+    if (display && pressedKeys.size === 0) display.innerHTML = '&nbsp;';
+  }
+
+  function getNote(e) {
+    const target = e.target.closest('.key');
+    return target ? parseInt(target.dataset.note) : -1;
+  }
+
+  kb.addEventListener('mousedown', (e) => {
+    isDown = true;
+    const n = getNote(e);
+    if (n >= 0) noteOn(n);
+  });
+
+  kb.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    const n = getNote(e);
+    // Release keys not under cursor
+    for (const k of pressedKeys) {
+      if (k !== n) noteOff(k);
+    }
+    if (n >= 0) noteOn(n);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isDown) {
+      isDown = false;
+      for (const k of [...pressedKeys]) noteOff(k);
+    }
+  });
+
+  // Touch
+  kb.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.dataset.note) noteOn(parseInt(el.dataset.note));
+    }
+  }, { passive: false });
+
+  kb.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const currentNotes = new Set();
+    for (const t of e.touches) {
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.dataset.note) currentNotes.add(parseInt(el.dataset.note));
+    }
+    for (const k of [...pressedKeys]) {
+      if (!currentNotes.has(k)) noteOff(k);
+    }
+    for (const n of currentNotes) noteOn(n);
+  }, { passive: false });
+
+  kb.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    // Check which touches remain
+    const remaining = new Set();
+    for (const t of e.touches) {
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.dataset.note) remaining.add(parseInt(el.dataset.note));
+    }
+    for (const k of [...pressedKeys]) {
+      if (!remaining.has(k)) noteOff(k);
+    }
+  }, { passive: false });
+}
+
+function updateKeyHighlights() {
+  const kb = document.getElementById('keyboard');
+  if (!kb) return;
+  for (const key of kb.querySelectorAll('.key')) {
+    const n = parseInt(key.dataset.note);
+    key.classList.toggle('pressed', pressedKeys.has(n));
+  }
+}
+
+// ── Detail Pane Live Update ──────────────────────────────────────
+
+function updateDetail() {
+  if (activeDetail < 0) return;
+  const cs = channelStates[activeDetail];
+  if (!cs) return;
+  const slot = rackState.slots[activeDetail];
+  if (!slot || !slot.active) return;
+
+  /* Sync detail type dropdown */
+  const dtSel = document.getElementById('detail-type-sel');
+  if (dtSel && document.activeElement !== dtSel) dtSel.value = slot.type || '';
+
+  /* Generic param update — update all sliders/selects/toggles from cs.params */
+  if (cs.params) {
+    const schema = instSchemas[slot.type];
+    if (schema) {
+      schema.params.forEach(p => {
+        const v = cs.params[p.name];
+        if (v === undefined) return;
+        /* Slider */
+        const slider = document.getElementById(`gp-pslider-${p.name}`);
+        const valEl = document.getElementById(`gp-pval-${p.name}`);
+        if (slider && document.activeElement !== slider) {
+          slider.value = p.scale === 'log' ? logToSlider(v, p.min, p.max) : v;
+          if (valEl) valEl.textContent = fmtVal(p.scale === 'log' ? {log:true} : p, v);
+        }
+        /* Select */
+        const sel = document.getElementById(`gp-sel-${p.name}`);
+        if (sel && document.activeElement !== sel) sel.value = Math.round(v);
+        /* Bool toggle */
+        const btn = document.getElementById(`gp-btn-${p.name}`);
+        if (btn) { btn.textContent = v ? 'ON' : 'OFF'; btn.style.background = v ? 'var(--accent)' : 'var(--card)'; }
+      });
+    }
+  }
+
+  /* ADSR canvases */
+  if (cs.params) {
+    document.querySelectorAll('.adsr-canvas').forEach(c => {
+      if (c._adsrUpdate) c._adsrUpdate(cs.params);
+    });
+  }
+
+  /* Volume */
+  const detVol = document.getElementById('detail-vol');
+  const detVolVal = document.getElementById('detail-vol-val');
+  if (detVol && document.activeElement !== detVol && cs.volume !== undefined) {
+    detVol.value = cs.volume;
+    if (detVolVal) detVolVal.textContent = cs.volume.toFixed(2);
+  }
+}
+
+
+// ── Inst name click → toggle rack drawer ─────────────────────────
+{ const instName = document.getElementById('inst-name');
+  if (instName) instName.addEventListener('click', () => {
+    document.getElementById('rack')?.classList.toggle('open');
+  });
+}
+
+// ── MIDI Monitor ────────────────────────────────────────────────
+
+const MIDI_TYPE_NAMES = {0x80:'NoteOff',0x90:'NoteOn',0xA0:'AfterT',0xB0:'CC',0xC0:'PgmChg',0xD0:'ChanPr',0xE0:'PBend'};
+
+function updateMidiMonitor(events) {
+  const log = document.getElementById('midi-log');
+  if (!log || document.getElementById('midi-monitor').style.display === 'none') return;
+  for (const [status, d1, d2] of events) {
+    const type = status & 0xF0;
+    const ch = status & 0x0F;
+    const name = MIDI_TYPE_NAMES[type] || ('0x' + type.toString(16));
+    const line = document.createElement('div');
+    line.textContent = `ch${ch} ${name.padEnd(8)} ${String(d1).padStart(3)} ${String(d2).padStart(3)}`;
+    if (type === 0x90 && d2 > 0) line.style.color = '#0f0';
+    else if (type === 0x80 || (type === 0x90 && d2 === 0)) line.style.color = '#666';
+    else if (type === 0xB0) line.style.color = '#ff8800';
+    else if (type === 0xE0) line.style.color = '#8866cc';
+    log.insertBefore(line, log.firstChild);
+    if (log.children.length > 200) log.removeChild(log.lastChild);
+  }
+}
+
+document.getElementById('mon-toggle')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const mon = document.getElementById('midi-monitor');
+  mon.style.display = mon.style.display === 'none' ? 'block' : 'none';
+});
+
+// ── Init ─────────────────────────────────────────────────────────
+
+/* Topbar channel nav */
+/* Ch nav (only if elements exist — shell handles these in SPA mode) */
+{ const cp = document.getElementById('ch-prev');
+  const cn = document.getElementById('ch-next');
+  if (cp) cp.addEventListener('click', () => { openDetail((activeDetail + 15) % 16); send({type:'focus_ch',channel:activeDetail}); });
+  if (cn) cn.addEventListener('click', () => { openDetail((activeDetail + 1) % 16); send({type:'focus_ch',channel:activeDetail}); });
+}
+
+/* Rack drawer toggle */
+document.getElementById('rack-toggle')?.addEventListener('click', () => {
+  document.getElementById('rack')?.classList.toggle('open');
+});
+
+/* Update topbar ch label when detail changes */
+const _origOpenDetail = openDetail;
+
+renderRack();
+connect();
+const urlCh = new URLSearchParams(location.search).get('ch');
+if (urlCh !== null) {
+  const ch = parseInt(urlCh);
+  if (ch >= 0 && ch < 16) {
+    _initDone = true; /* URL param overrides server focused_ch */
+    setTimeout(() => openDetail(ch), 800);
+  }
+}
+/* Otherwise, first rack_status + rack_types SSE events trigger openDetail */
+renderKeyboard(0);
+
+/* BPM/master/midi handled by SPA shell — rack page is embedded */
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+</script>
+</div><!-- #page -->
+</body>
+</html>

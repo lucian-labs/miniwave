@@ -510,7 +510,7 @@ static void sub_synth_render(void *state, float *stereo_buf, int frames,
             mix += sample;
         }
 
-        mix *= s->volume;
+        mix *= s->volume * 0.88f;
         mix = sub_limiter(mix);
 
         stereo_buf[i * 2]     = mix;

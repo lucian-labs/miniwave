@@ -2,3 +2,9 @@ miniwave
 *.o
 build/
 .DS_Store
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/build/
+android/local.properties
+android/gradle/wrapper/gradle-wrapper.jar

@@ -255,7 +255,7 @@ static void bird_render(void *state, float *buf, int frames, int sample_rate) {
             v->time += dt;
         }
 
-        mix *= s->volume;
+        mix *= s->volume * 0.70f;
         buf[i * 2]     += mix;
         buf[i * 2 + 1] += mix;
     }

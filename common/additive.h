@@ -497,7 +497,7 @@ static void additive_render(void *state, float *stereo_buf, int frames, int samp
             while (v->phase >= ADD_TABLE_SIZE) v->phase -= ADD_TABLE_SIZE;
         }
 
-        mix *= s->volume;
+        mix *= s->volume * 0.80f;
         /* Simple soft clip */
         if (mix > 0.95f) mix = 0.95f;
         if (mix < -0.95f) mix = -0.95f;

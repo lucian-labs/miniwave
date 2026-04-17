@@ -86,27 +86,29 @@ typedef struct {
     FMDrumDef  def;        /* current editable params */
 } FMDrumNote;
 
-/* Default note-to-preset mapping for GM drum range */
+/* Per-note preset mapping — full C1-C7 coverage.
+ * GM standard for 35-61, creative variation elsewhere.
+ * fmd_ensure_note applies pitch/character scaling so every note is unique.
+ *
+ * Presets: 0=Kick 1=Snare 2=Clap 3=CH 4=OH 5=Tom
+ *          6=Rim 7=Bell 8=Cymbal 9=Zap 10=Bomb 11=Glitch
+ *          12=Scratch 13=Shaker 14=Blip 15=Riser                    */
 static int fmd_default_preset(int note) {
-    switch (note) {
-    case 35: case 36: return 0;   /* kick */
-    case 38: case 40: return 1;   /* snare */
-    case 39:          return 2;   /* clap */
-    case 42: case 44: return 3;   /* closed hh */
-    case 46:          return 4;   /* open hh */
-    case 41: case 43: case 45: case 47: case 48: case 50: return 5; /* tom */
-    case 37:          return 6;   /* rimshot */
-    case 56:          return 7;   /* cowbell */
-    case 49: case 51: case 52: case 57: return 8; /* cymbal */
-    case 53:          return 9;   /* zap */
-    case 54:          return 10;  /* bomb */
-    case 55:          return 11;  /* glitch */
-    case 58:          return 12;  /* scratch */
-    case 59:          return 13;  /* shaker */
-    case 60:          return 14;  /* blip */
-    case 61:          return 15;  /* riser */
-    default:          return 0;   /* fallback to kick */
-    }
+    static const uint8_t map[128] = {
+    /*       C   C#  D   D#  E   F   F#  G   G#  A   A#  B         */
+    /* C-1*/ 10,  0,  5, 15,  0, 10,  5,  9,  0,  5, 15,  9,
+    /* C0 */ 10,  0,  5, 15,  0, 10,  5,  9,  0,  5, 15,  9,
+    /* C1 */ 10,  0,  5, 15,  0, 10,  5,  9,  0,  5, 15,  0,
+    /* C2 */  0,  6,  1,  2,  1,  5,  3,  5,  3,  5,  4,  5, /* GM */
+    /* C3 */  5,  8,  5,  8,  8,  9, 10, 11,  7,  8, 12, 13, /* GM */
+    /* C4 */ 14, 15,  7, 14,  9, 11,  6, 12,  7,  9,  2, 14,
+    /* C5 */  3,  4,  8, 13, 12, 11,  3, 13,  8, 12,  6,  4,
+    /* C6 */ 14,  3,  6, 14, 11,  3, 13,  6, 14,  9,  3, 11,
+    /* C7 */  7, 14,  3,  9,  6, 14, 11,  7, 14,  3,  9,  6,
+    /* C8 */ 14,  3,  9,  6, 14,  3,  9,  6, 14,  3,  9, 14,
+    /* .. */ 14,  3, 14,  9,  3,  9, 14,  3,
+    };
+    return map[note & 0x7F];
 }
 
 /* ── Voice ────────────────────────────────────────────────────────── */
@@ -142,13 +144,35 @@ static inline float fmd_noise(uint32_t *state) {
     return (float)(s & 0x7FFFFFFF) / (float)0x7FFFFFFF * 2.0f - 1.0f;
 }
 
-/* Ensure a note has been initialized with a preset */
+/* Ensure a note has been initialized with a preset.
+ * Notes outside GM range (35-61) get pitch/character scaling
+ * so every note across C1-C7 sounds unique. */
 static void fmd_ensure_note(FMDrumState *s, int note) {
     if (note < 0 || note >= FMD_NUM_NOTES) return;
     if (s->notes[note].preset < 0) {
         int p = fmd_default_preset(note);
         s->notes[note].preset = p;
         s->notes[note].def = FMD_PRESETS[p];
+
+        /* Per-note scaling for non-GM notes */
+        if (note < 35 || note > 61) {
+            FMDrumDef *d = &s->notes[note].def;
+            /* Pitch: octave per 24 semitones from C3 */
+            float ps = powf(2.0f, (float)(note - 48) / 24.0f);
+            d->carrier_freq *= ps;
+            d->mod_freq     *= ps;
+            d->pitch_sweep  *= ps;
+            /* Decay: longer low, shorter high */
+            float ds = powf(2.0f, (float)(48 - note) / 36.0f);
+            if (ds < 0.08f) ds = 0.08f;
+            if (ds > 4.0f)  ds = 4.0f;
+            d->decay       *= ds;
+            d->pitch_decay *= ds;
+            /* Per-semitone character variation */
+            float nf = (float)(note % 12) / 12.0f;
+            d->noise_amt *= 0.7f + nf * 0.6f;
+            d->click_amt *= 0.5f + (1.0f - nf) * 1.0f;
+        }
     }
 }
 
@@ -168,8 +192,8 @@ static void fmd_init(void *state) {
     /* Mark all notes as uninitialized — lazy-init on first use */
     for (int i = 0; i < FMD_NUM_NOTES; i++)
         s->notes[i].preset = -1;
-    /* Pre-init the standard GM drum notes */
-    for (int n = 35; n <= 61; n++)
+    /* Pre-init all playable notes C1-C7 */
+    for (int n = 24; n <= 96; n++)
         fmd_ensure_note(s, n);
 }
 
@@ -302,7 +326,7 @@ static void fmd_render(void *state, float *stereo_buf, int frames, int sample_ra
             mix += sample;
         }
 
-        mix *= s->volume;
+        mix *= s->volume * 0.52f;
         if (mix > 0.95f) mix = 0.95f;
         else if (mix < -0.95f) mix = -0.95f;
         stereo_buf[i * 2]     = mix;
@@ -414,10 +438,11 @@ static int fmd_json_save(void *state, char *buf, int max) {
         (double)ed->decay, (double)ed->noise_amt,
         (double)ed->click_amt, (double)ed->feedback);
     /* Full per-note data for persistence */
-    pos += snprintf(buf + pos, (size_t)(max - pos), "\"notes\":{");
+    if (pos < max) pos += snprintf(buf + pos, (size_t)(max - pos), "\"notes\":{");
     int first = 1;
     for (int ni = 0; ni < FMD_NUM_NOTES; ni++) {
         if (ds->notes[ni].preset < 0) continue;
+        if (pos >= max - 2) break; /* guard against buffer overflow */
         FMDrumDef *dd = &ds->notes[ni].def;
         pos += snprintf(buf + pos, (size_t)(max - pos),
             "%s\"%d\":{\"p\":%d,\"cf\":%.4f,\"mf\":%.4f,\"mi\":%.4f,"
@@ -431,7 +456,7 @@ static int fmd_json_save(void *state, char *buf, int max) {
             (double)dd->feedback);
         first = 0;
     }
-    pos += snprintf(buf + pos, (size_t)(max - pos), "}");
+    if (pos < max) pos += snprintf(buf + pos, (size_t)(max - pos), "}");
     return pos;
 }
 

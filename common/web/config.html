@@ -15,123 +15,207 @@
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
 * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
 :root {
-  --bg: #0d0d0d; --panel: #1a1a2e; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #e0e0e0; --dim: #666; --border: #2a2a4a;
-  --hw-shadow:
-    rgba(255,255,255,0.18) 0 1px 1px 0 inset,
-    rgba(0,0,0,0.7) 0 -1px 1px 0 inset,
-    rgba(0,0,0,0.25) 0 1px 2px 0,
-    rgba(0,0,0,0.22) 0 3px 4px -1px,
-    rgba(0,0,0,0.18) 0 6px 8px -2px;
-  --hw-shadow-sm:
-    rgba(255,255,255,0.15) 0 1px 0 0 inset,
-    rgba(0,0,0,0.6) 0 -1px 0 0 inset,
-    rgba(0,0,0,0.3) 0 1px 2px 0;
+  --bg: #0d0d0d; --panel: #111; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #eee; --dim: #aaa; --border: #2a2a4a;
+  --hw-shadow: rgba(255,255,255,0.18) 0 1px 1px 0 inset, rgba(0,0,0,0.7) 0 -1px 1px 0 inset, rgba(0,0,0,0.25) 0 1px 2px 0, rgba(0,0,0,0.22) 0 3px 4px -1px, rgba(0,0,0,0.18) 0 6px 8px -2px;
+  --hw-shadow-sm: rgba(255,255,255,0.15) 0 1px 0 0 inset, rgba(0,0,0,0.6) 0 -1px 0 0 inset, rgba(0,0,0,0.3) 0 1px 2px 0;
   --hw-pressed: rgba(0,0,0,0.85) 0 1px 5px 0 inset;
 }
 html, body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; height: 100%; overflow: hidden; }
 
-#page { display: flex; flex-direction: column; height: 100%; padding: 16px 20px; gap: 12px; }
+#page { display: flex; flex-direction: column; height: 100%; padding: 12px 16px; gap: 10px; }
 
-#header { flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
-#header h1 { color: var(--accent); font-size: 16px; white-space: nowrap; }
-#header h1 a { text-decoration: none; }
-#header .uptime { color: var(--dim); font-size: 10px; }
-#header .touch-link { margin-left: auto; font-size: 11px; color: var(--good); text-decoration: none; padding: 4px 10px; background: var(--card); border-radius: 5px; box-shadow: var(--hw-shadow-sm); }
-#header .touch-link:hover { color: #fff; }
-
-#columns { display: flex; gap: 14px; flex: 1; min-height: 0; overflow-y: auto; }
+#columns { display: flex; gap: 12px; flex: 1; min-height: 0; overflow-y: auto; }
 .col { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
-.section { background: var(--panel); border: none; border-radius: 6px; padding: 12px; flex-shrink: 0; box-shadow: var(--hw-shadow); }
-.section h3 { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.section { background: var(--panel); border: none; border-radius: 6px; padding: 10px; flex-shrink: 0; box-shadow: var(--hw-shadow); }
+.section h3 { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+.section h3 .badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--card); color: var(--dim); box-shadow: var(--hw-shadow-sm); }
+.section h3 .badge.on { background: var(--good); color: #000; }
 
-.row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 11px; }
 .row .label { color: var(--dim); }
 .row .val { color: var(--text); text-align: right; }
 .row .val.good { color: var(--good); }
 .row .val.warn { color: #ffd700; }
 .row .val.off { color: var(--dim); }
 
-.cpu-bar { height: 6px; background: var(--card); border-radius: 3px; margin-top: 4px; overflow: hidden; box-shadow: var(--hw-pressed); }
-.cpu-fill { height: 100%; border-radius: 3px; transition: width 0.3s, background 0.3s; }
-
-.slot-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-.slot-cell {
-  background: var(--card); border: 1px solid var(--border); border-radius: 4px;
-  padding: 5px 6px; font-size: 9px; text-align: center; cursor: pointer;
-  box-shadow: var(--hw-shadow-sm); transition: all 0.15s;
-}
-.slot-cell:hover { border-color: var(--accent); }
-.slot-cell:active { box-shadow: var(--hw-pressed); }
-.slot-cell.active { border-color: var(--good); }
-.slot-cell.focused { border-color: var(--accent); box-shadow: 0 0 6px rgba(233,69,96,0.3); }
-.slot-cell .ch { color: var(--dim); font-size: 8px; }
-.slot-cell .type { color: var(--text); font-size: 10px; }
-.slot-cell.empty .type { color: var(--dim); font-style: italic; }
+.cpu-bar { height: 4px; background: var(--card); border-radius: 2px; margin-top: 2px; overflow: hidden; box-shadow: var(--hw-pressed); }
+.cpu-fill { height: 100%; border-radius: 2px; transition: width 0.3s, background 0.3s; }
 
 .midi-dev {
   background: var(--card); border: 1px solid var(--border); border-radius: 4px;
-  padding: 6px 10px; margin-bottom: 3px; font-size: 11px;
-  display: flex; justify-content: space-between; cursor: pointer;
-  box-shadow: var(--hw-shadow-sm); transition: all 0.15s;
+  padding: 4px 8px; margin-bottom: 2px; font-size: 10px;
+  display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+  box-shadow: var(--hw-shadow-sm); transition: all 0.15s; gap: 6px;
 }
 .midi-dev:hover { border-color: var(--accent); }
 .midi-dev:active { box-shadow: var(--hw-pressed); }
-.midi-dev .id { color: var(--dim); }
+.midi-dev .id { color: var(--dim); font-size: 9px; }
 .midi-dev.connected { border-color: var(--good); }
+.midi-dev .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--dim); }
+.midi-dev.connected .dot { background: var(--good); box-shadow: 0 0 3px var(--good); }
 
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
-.dot.on { background: var(--good); box-shadow: 0 0 4px var(--good); }
-.dot.off { background: var(--dim); }
+.slot-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.slot-cell {
+  background: var(--card); border: 1px solid var(--border); border-radius: 3px;
+  padding: 3px 4px; font-size: 8px; text-align: center; cursor: pointer;
+  box-shadow: var(--hw-shadow-sm); transition: all 0.15s;
+}
+.slot-cell:hover { border-color: var(--accent); }
+.slot-cell.active { border-color: var(--good); }
+.slot-cell.focused { border-color: var(--accent); box-shadow: 0 0 4px rgba(233,69,96,0.3); }
+.slot-cell.trig { background: rgba(0,212,170,0.15); transition: background 0.05s; }
+.slot-cell:not(.trig) { transition: background 0.4s ease-out; }
+.slot-cell .ch { color: var(--dim); font-size: 7px; }
+.slot-cell .type { color: var(--text); font-size: 9px; }
+.slot-cell.empty .type { color: var(--dim); }
 
-@media (max-width: 700px) { #columns { flex-direction: column; overflow-y: auto; } }
+.cc-table { font-size: 10px; width: 100%; }
+.cc-table th { color: var(--dim); text-align: left; font-weight: normal; text-transform: uppercase; font-size: 9px; padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.cc-table td { padding: 1px 4px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.cc-table td:first-child { color: var(--accent); font-weight: bold; width: 30px; }
+.cc-table td:last-child { color: var(--dim); font-size: 9px; }
+
+.mon-line { font-size: 10px; padding: 1px 0; font-family: inherit; }
+.mon-note { color: var(--good); }
+.mon-cc { color: #ff8800; }
+.mon-bend { color: #8866cc; }
+.mon-other { color: var(--dim); }
+
+button.sm { padding: 2px 6px; font-size: 9px; border-radius: 3px; background: var(--card); border: none; color: var(--text); cursor: pointer; box-shadow: var(--hw-shadow-sm); }
+button.sm:hover { color: #fff; }
+button.sm:active { box-shadow: var(--hw-pressed); }
+button.sm.danger { color: var(--accent); }
+
+.meter-bar { display: flex; gap: 2px; align-items: flex-end; height: 40px; }
+.meter-ch { display: flex; flex-direction: column; align-items: center; gap: 1px; flex: 1; }
+.meter-fill-wrap { width: 100%; height: 32px; background: var(--card); border-radius: 2px; position: relative; overflow: hidden; box-shadow: var(--hw-pressed); }
+.meter-fill { position: absolute; bottom: 0; left: 0; right: 0; background: var(--good); border-radius: 2px; transition: height 0.05s; }
+.meter-fill.hot { background: #ffd700; }
+.meter-fill.clip { background: var(--accent); }
+.meter-ch-label { font-size: 7px; color: var(--dim); }
+
+.master-meter { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+.master-meter-bar { flex: 1; height: 8px; background: var(--card); border-radius: 3px; overflow: hidden; box-shadow: var(--hw-pressed); position: relative; }
+.master-meter-fill { height: 100%; border-radius: 3px; transition: width 0.05s; background: var(--good); }
+.master-meter-fill.hot { background: #ffd700; }
+.master-meter-fill.clip { background: var(--accent); }
+.hold-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); border-radius: 1px; transition: left 0.1s; }
+
+@media (max-width: 800px) { #columns { flex-direction: column; overflow-y: auto; } }
 </style>
 </head>
 <body>
 <div id="page">
 
-<div id="header">
-  <h1><a href="/" style="color:var(--accent)">miniwave</a> / <a href="/keyseq" style="color:#8866cc">keyseq</a> / <a href="/effex" style="color:#00d4aa">effex</a> / <a href="/chords" style="color:#ff8800">chords</a> / <span style="color:var(--text)">cfg</span> <span id="version" style="color:var(--dim);font-size:10px;font-weight:normal"></span></h1>
-  <span class="uptime" id="uptime"></span>
-  <a href="/touch" class="touch-link">touch</a>
-</div>
-
 <div id="columns">
   <div class="col">
     <div class="section">
-      <h3>System</h3>
-      <div class="row"><span class="label">Audio</span><span class="val good" id="audio-backend"></span></div>
+      <h3>Audio <span class="badge on" id="audio-badge">ALSA</span></h3>
       <div class="row"><span class="label">Device</span><span class="val" id="audio-device"></span></div>
       <div class="row"><span class="label">Rate</span><span class="val" id="sample-rate"></span></div>
       <div class="row"><span class="label">Period</span><span class="val" id="period-size"></span></div>
-      <div class="row"><span class="label">BPM</span><span class="val" id="bpm"></span></div>
-      <div class="row"><span class="label">Master</span><span class="val" id="master-vol"></span></div>
-      <div class="row"><span class="label">Mute</span><span class="val" id="local-mute"></span></div>
+      <div class="row"><span class="label">Latency</span><span class="val" id="latency"></span></div>
       <div class="row"><span class="label">CPU</span><span class="val" id="cpu-load"></span></div>
       <div class="cpu-bar"><div class="cpu-fill" id="cpu-fill"></div></div>
+    </div>
+
+    <div class="section">
+      <h3>Engine</h3>
+      <div class="row"><span class="label">Version</span><span class="val good" id="version"></span></div>
+      <div class="row"><span class="label">BPM</span><span class="val" id="bpm"></span></div>
+      <div class="row"><span class="label">Master</span><span class="val" id="master-vol"></span></div>
+      <div class="row"><span class="label">Local Mute</span><span class="val" id="local-mute"></span></div>
+      <div class="row"><span class="label">Focused CH</span><span class="val" id="focused-ch"></span></div>
+      <div class="row"><span class="label">L</span><span class="val" id="db-l" style="font-size:10px"></span></div>
+      <div class="master-meter">
+        <div class="master-meter-bar"><div class="master-meter-fill" id="master-pk-l"></div><div class="hold-mark" id="hold-l"></div></div>
+      </div>
+      <div class="row"><span class="label">R</span><span class="val" id="db-r" style="font-size:10px"></span></div>
+      <div class="master-meter">
+        <div class="master-meter-bar"><div class="master-meter-fill" id="master-pk-r"></div><div class="hold-mark" id="hold-r"></div></div>
+      </div>
+      <div class="row"><span class="label">Hold</span><span class="val" id="master-hold-db" style="font-size:10px"></span>
+        <button class="sm" onclick="api({type:'peak_reset'})" style="margin-left:4px">reset</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Network</h3>
+      <div class="row"><span class="label">Host</span><span class="val" id="hostname"></span></div>
+      <div class="row"><span class="label">IP</span><span class="val good" id="host-ip"></span></div>
+      <div class="row"><span class="label">HTTP/SSE</span><span class="val good">:8080</span></div>
+      <div class="row"><span class="label">OSC</span><span class="val" id="osc-port"></span></div>
+      <div class="row"><span class="label">Multicast</span><span class="val" id="mcast"></span></div>
+      <div class="row"><span class="label">waveOS Bus</span><span class="val" id="bus"></span></div>
+      <div class="row"><span class="label">SSE Clients</span><span class="val" id="sse-clients"></span></div>
+    </div>
+
+    <div class="section">
+      <h3>MIDI — Pi USB <button class="sm" id="midi-refresh" title="Rescan">rescan</button></h3>
+      <div id="midi-list"></div>
+    </div>
+
+    <div class="section">
+      <h3>MIDI — Browser <span class="badge" id="webmidi-badge">—</span></h3>
+      <div id="webmidi-list"></div>
     </div>
   </div>
 
   <div class="col">
-    <div class="section">
-      <h3>Network</h3>
-      <div class="row"><span class="label">HTTP/SSE</span><span class="val good">:8080</span></div>
-      <div class="row"><span class="label">OSC</span><span class="val" id="osc-port"></span></div>
-      <div class="row"><span class="label">Multicast</span><span class="val" id="mcast"></span></div>
-      <div class="row"><span class="label">Bus</span><span class="val" id="bus"></span></div>
-      <div class="row"><span class="label">SSE</span><span class="val" id="sse-clients"></span></div>
-    </div>
     <div class="section">
       <h3>Rack</h3>
       <div class="slot-grid" id="slot-grid"></div>
     </div>
+
+    <div class="section">
+      <h3>MIDI Monitor <button class="sm" id="mon-clear">clear</button></h3>
+      <div id="midi-mon" style="max-height:120px;overflow-y:auto"></div>
+    </div>
+
+    <div class="section">
+      <h3>MIDI Learn (global) <button class="sm" id="learn-clear">clear all</button></h3>
+      <div id="learn-status" style="color:var(--good);font-size:10px;margin-bottom:4px"></div>
+      <div id="learn-list"></div>
+    </div>
   </div>
 
   <div class="col">
     <div class="section">
-      <h3>MIDI</h3>
-      <div class="row"><span class="label">Active</span><span class="val" id="midi-connected"></span></div>
-      <div id="midi-list" style="margin-top:6px"></div>
+      <h3>Levels <button class="sm" onclick="api({type:'peak_reset'})">reset</button></h3>
+      <div class="meter-bar" id="meter-bar"></div>
+    </div>
+
+    <div class="section">
+      <h3>FFT</h3>
+      <canvas id="fft-canvas" width="400" height="80" style="width:100%;height:80px;border-radius:4px;background:var(--card)"></canvas>
+    </div>
+
+    <div class="section">
+      <h3>Gain Test <button class="sm" id="gain-test-btn">run</button></h3>
+      <div id="gain-results" style="font-size:10px;color:var(--dim)">Click run to test all instruments</div>
+    </div>
+
+    <div class="section" id="inst-cc-section">
+      <h3>Instrument CC <span class="badge" id="inst-cc-type">—</span></h3>
+      <table class="cc-table" id="inst-cc-table">
+        <tr><th>CC</th><th>Parameter</th><th>Range</th></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>MIDI Routing</h3>
+      <div id="midi-routes" style="font-size:10px"></div>
+    </div>
+
+    <div class="section">
+      <h3>Actions</h3>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="sm" onclick="api({type:'panic'})">panic</button>
+        <button class="sm" onclick="if(confirm('Save?')) api({type:'rack_save'})">save</button>
+        <button class="sm danger" onclick="if(confirm('Restart?')) api({type:'quit'})">restart</button>
+        <button class="sm danger" onclick="if(confirm('Shutdown? Needs physical power cycle.')) api({type:'shutdown'})">shutdown</button>
+      </div>
     </div>
   </div>
 </div>
@@ -139,75 +223,449 @@ html, body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 
 </div>
 
 <script>
+'use strict';
 const $ = id => document.getElementById(id);
-let startTime = Date.now();
+const api = b => fetch('/api', {method:'POST', body:JSON.stringify(b)}).then(r=>r.json());
 let currentMidi = '';
-let focusedCh = -1;
+let focusedCh = 0;
 
+/* ── Instrument CC maps ── */
+const INST_CC = {
+  'fm-synth': [
+    [14,'Mod index','0-30 exp'],[15,'Mod ratio','0.5-12x snap'],[16,'Carrier ratio','0.5-12x snap'],
+    [17,'Feedback','0-2.5'],[18,'Attack','0.001-3s'],[19,'Decay','0.01-5s'],
+    [20,'Sustain','0-1'],[21,'Release','0.01-5s']
+  ],
+  'sub-synth': [
+    [14,'Filter cutoff','20-20kHz exp'],[15,'Resonance','0-1'],[16,'Waveform','0-5'],
+    [17,'Pulse width','0.05-0.95'],[18,'Filter env depth','-1 to +1'],
+    [19,'Amp attack','0.001-5s'],[20,'Amp sustain','0-1'],[21,'Amp release','0.001-5s']
+  ],
+  'phase-dist': [
+    [14,'Distortion','0-1'],[15,'Timbre','0-1'],[16,'Mode','0-5'],
+    [17,'Color/LPF','20Hz-16kHz'],[18,'Attack','log'],[19,'Decay','log'],
+    [20,'Sustain','0-1'],[21,'Release','log']
+  ],
+  'additive': [
+    [14,'Mode','0-5 zones'],[15,'Harmonics','1-64'],[16,'Ratio','0.25-4 log'],
+    [17,'Spread','0-3'],[18,'Rolloff','0.05-1'],[19,'Character','inharmonicity'],
+    [20,'Shape macro','atk/dec/sus'],[21,'Release','0.01-8s']
+  ],
+  'ym2413': [
+    [14,'Instrument','0-15'],[15,'Mod total level','0-63'],[16,'Feedback','0-7'],
+    [17,'Mod multiplier','macro'],[18,'Mod attack','macro'],[19,'Mod decay','macro'],
+    [20,'Carrier attack','macro'],[21,'Carrier decay','macro']
+  ],
+  'bird': [
+    [14,'Chirp rate','0.02-0.5s'],[15,'Vibrato depth','0-1'],[16,'Vibrato rate','0.5-20Hz']
+  ],
+  'fm-drums': [
+    [14,'Carrier freq','20-2kHz'],[15,'Mod freq','20-8kHz'],[16,'Mod index','0-10'],
+    [17,'Pitch sweep','±400Hz'],[18,'Decay','0.01-2s'],[19,'Noise','0-1'],
+    [20,'Click','0-1'],[21,'Feedback','0-1']
+  ]
+};
+
+function renderInstCC(type) {
+  const badge = $('inst-cc-type');
+  const table = $('inst-cc-table');
+  if (!badge || !table) return;
+  badge.textContent = type || '—';
+  const ccs = INST_CC[type];
+  if (!ccs) { table.innerHTML = '<tr><td colspan="3" style="color:var(--dim);text-align:center;padding:8px">Select a channel with an instrument</td></tr>'; return; }
+  table.innerHTML = '<tr><th>CC</th><th>Parameter</th><th>Range</th></tr>' +
+    ccs.map(c => `<tr><td>${c[0]}</td><td>${c[1]}</td><td>${c[2]}</td></tr>`).join('');
+}
+
+/* ── MIDI Monitor ── */
+const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+function noteName(n) { return NOTES[n%12] + (Math.floor(n/12)-1); }
+
+/* ── SSE ── */
 const es = new EventSource('/events');
 
 es.addEventListener('rack_status', e => {
   const d = JSON.parse(e.data);
-  $('version').textContent = 'v' + (d.version || '?');
-  $('audio-backend').textContent = d.audio_backend;
-  $('audio-device').textContent = d.audio_device || 'default';
-  $('sample-rate').textContent = d.sample_rate + ' Hz';
-  $('period-size').textContent = d.period_size + ' (' + (d.period_size / d.sample_rate * 1000).toFixed(1) + 'ms)';
-  $('bpm').textContent = d.bpm;
-  $('master-vol').textContent = (d.master_volume * 100).toFixed(0) + '%';
-  $('local-mute').innerHTML = d.local_mute
-    ? '<span class="dot on"></span>bus only' : '<span class="dot off"></span>off';
+  const ver = $('version'); if (ver) ver.textContent = 'v' + d.version;
+  const ab = $('audio-badge'); if (ab) ab.textContent = d.audio_backend;
+  const ad = $('audio-device'); if (ad) ad.textContent = d.audio_device || 'default';
+  const sr = $('sample-rate'); if (sr) sr.textContent = d.sample_rate + ' Hz';
+  const ps = $('period-size'); if (ps) ps.textContent = d.period_size + ' samples';
+  const lat = $('latency'); if (lat) lat.textContent = (d.period_size / d.sample_rate * 1000).toFixed(1) + 'ms (' + (d.period_size * 4 / d.sample_rate * 1000).toFixed(1) + 'ms buf)';
 
   const cpu = d.cpu_load * 100;
-  $('cpu-load').textContent = cpu.toFixed(1) + '%';
-  $('cpu-load').className = 'val ' + (cpu > 80 ? 'warn' : cpu > 0 ? 'good' : '');
-  const f = $('cpu-fill');
-  f.style.width = Math.min(cpu, 100) + '%';
-  f.style.background = cpu > 80 ? '#ffd700' : cpu > 50 ? '#ff8800' : 'var(--good)';
+  const cl = $('cpu-load'); if (cl) { cl.textContent = cpu.toFixed(1) + '%'; cl.className = 'val ' + (cpu > 80 ? 'warn' : cpu > 0 ? 'good' : ''); }
+  const cf = $('cpu-fill'); if (cf) { cf.style.width = Math.min(cpu,100) + '%'; cf.style.background = cpu > 80 ? '#ffd700' : cpu > 50 ? '#ff8800' : 'var(--good)'; }
 
-  $('osc-port').textContent = ':' + d.osc_port;
-  $('osc-port').className = 'val good';
-  if (d.mcast_active) { $('mcast').textContent = d.mcast_group; $('mcast').className = 'val good'; }
-  else { $('mcast').textContent = 'off'; $('mcast').className = 'val off'; }
-  if (d.bus_active) { $('bus').textContent = 'slot ' + d.bus_slot; $('bus').className = 'val good'; }
-  else { $('bus').textContent = '---'; $('bus').className = 'val off'; }
-  $('sse-clients').textContent = d.sse_clients;
+  const bp = $('bpm'); if (bp) bp.textContent = d.bpm;
+  const mv = $('master-vol'); if (mv) mv.textContent = (d.master_volume*100).toFixed(0) + '%';
+  const lm = $('local-mute'); if (lm) lm.textContent = d.local_mute ? 'ON (bus only)' : 'off';
+  const fc = $('focused-ch'); if (fc) fc.textContent = 'CH ' + ((d.focused_ch||0)+1);
+  focusedCh = d.focused_ch || 0;
+
+  const hn = $('hostname'); if (hn) hn.textContent = d.hostname || '?';
+  const hip = $('host-ip'); if (hip) hip.textContent = d.ip || '?';
+  const op = $('osc-port'); if (op) { op.textContent = ':' + d.osc_port; op.className = 'val good'; }
+  const ob = $('osc-badge'); if (ob) ob.textContent = ':' + d.osc_port;
+  if (d.mcast_active) { const mc = $('mcast'); if (mc) { mc.textContent = d.mcast_group; mc.className = 'val good'; } }
+  else { const mc = $('mcast'); if (mc) { mc.textContent = 'off'; mc.className = 'val off'; } }
+  if (d.bus_active) { const bu = $('bus'); if (bu) { bu.textContent = 'slot ' + d.bus_slot; bu.className = 'val good'; } }
+  else { const bu = $('bus'); if (bu) { bu.textContent = '---'; bu.className = 'val off'; } }
+  const sc = $('sse-clients'); if (sc) sc.textContent = d.sse_clients;
 
   currentMidi = d.midi_device || '';
-  $('midi-connected').innerHTML = currentMidi
-    ? '<span class="dot on"></span>' + currentMidi
-    : '<span class="dot off"></span>none';
 
-  focusedCh = d.focused_ch || 0;
+  /* Master meter with dB + hold */
+  if (d.master_pk) {
+    const toDb = v => v > 0.0001 ? (20*Math.log10(v)).toFixed(1) : '-inf';
+    const mkl = $('master-pk-l');
+    const mkr = $('master-pk-r');
+    const dbl = $('db-l');
+    const dbr = $('db-r');
+    if (mkl) { const p = Math.min(d.master_pk[0]*100,100); mkl.style.width = p+'%'; mkl.className = 'master-meter-fill' + (p>90?' clip':p>70?' hot':''); }
+    if (mkr) { const p = Math.min(d.master_pk[1]*100,100); mkr.style.width = p+'%'; mkr.className = 'master-meter-fill' + (p>90?' clip':p>70?' hot':''); }
+    if (dbl) dbl.textContent = toDb(d.master_pk[0]) + ' dB';
+    if (dbr) dbr.textContent = toDb(d.master_pk[1]) + ' dB';
+    /* Hold marks */
+    if (d.master_hold) {
+      const hl = $('hold-l'); if (hl) hl.style.left = Math.min(d.master_hold[0]*100,100)+'%';
+      const hr = $('hold-r'); if (hr) hr.style.left = Math.min(d.master_hold[1]*100,100)+'%';
+      const mhdb = $('master-hold-db');
+      if (mhdb) mhdb.textContent = 'L:'+toDb(d.master_hold[0])+' R:'+toDb(d.master_hold[1])+' dB';
+    }
+  }
+
+  /* Per-slot meters */
+  const mbar = $('meter-bar');
+  if (mbar) {
+    if (!mbar.children.length) {
+      for (let i = 0; i < 16; i++) {
+        const ch = document.createElement('div');
+        ch.className = 'meter-ch';
+        ch.innerHTML = '<div class="meter-fill-wrap"><div class="meter-fill" id="pk-'+i+'"></div></div><span class="meter-ch-label">'+(i+1)+'</span>';
+        mbar.appendChild(ch);
+      }
+    }
+    d.slots.forEach((s, i) => {
+      const el = $('pk-'+i);
+      if (!el) return;
+      const pk = s.pk ? Math.max(s.pk[0],s.pk[1]) : 0;
+      const h = Math.min(pk*100,100);
+      el.style.height = h+'%';
+      el.className = 'meter-fill' + (h>90?' clip':h>70?' hot':'');
+    });
+  }
+
+  /* Slots grid */
   const grid = $('slot-grid');
-  grid.innerHTML = '';
-  d.slots.forEach((s, i) => {
-    const c = document.createElement('div');
-    c.className = 'slot-cell' + (s.active ? ' active' : ' empty') + (i === focusedCh ? ' focused' : '');
-    c.innerHTML = '<div class="ch">' + (i+1) + '</div><div class="type">' + (s.active ? s.type : '---') + '</div>';
-    c.onclick = () => fetch('/api', {method:'POST', body:JSON.stringify({type:'focus_ch', channel:i})});
-    grid.appendChild(c);
-  });
+  if (grid) {
+    grid.innerHTML = '';
+    d.slots.forEach((s, i) => {
+      const c = document.createElement('div');
+      c.className = 'slot-cell' + (s.active ? ' active' : ' empty') + (i === focusedCh ? ' focused' : '');
+      c.innerHTML = '<div class="ch">' + (i+1) + '</div><div class="type">' + (s.active ? s.type : '—') + '</div>';
+      c.onclick = () => { api({type:'focus_ch', channel:i}); renderInstCC(s.active ? s.type : null); };
+      grid.appendChild(c);
+    });
+    const fs = d.slots[focusedCh];
+    renderInstCC(fs && fs.active ? fs.type : null);
+
+    /* Update MIDI routing table */
+    if (d.midi_routes) { midiRoutes = d.midi_routes; renderMidiRoutes(); }
+
+    /* Update global CC map */
+    if (d.cc_map) { learnCCMap = d.cc_map; renderLearnList(); }
+  }
 });
 
 es.addEventListener('midi_devices', e => {
   const d = JSON.parse(e.data);
   const list = $('midi-list');
+  if (!list) return;
   list.innerHTML = '';
-  if (!d.devices.length) { list.innerHTML = '<div style="color:var(--dim);font-size:11px">no devices</div>'; return; }
+  if (!d.devices.length) { list.innerHTML = '<div style="color:var(--dim);font-size:10px;padding:4px">no devices detected</div>'; return; }
   d.devices.forEach(dev => {
     const el = document.createElement('div');
-    el.className = 'midi-dev' + (currentMidi.includes(dev.id) ? ' connected' : '');
-    el.innerHTML = '<span>' + dev.name + '</span><span class="id">' + dev.id + '</span>';
-    el.onclick = () => fetch('/api', {method:'POST', body:JSON.stringify({type:'midi_device', value:dev.id})});
+    const conn = currentMidi && currentMidi.includes(dev.id);
+    el.className = 'midi-dev' + (conn ? ' connected' : '');
+    el.innerHTML = '<span class="dot"></span><span style="flex:1">' + dev.name + '</span><span class="id">' + dev.id + '</span>';
+    el.onclick = () => {
+      if (conn) api({type:'midi_disconnect'});
+      else api({type:'midi_device', value:dev.id});
+    };
     list.appendChild(el);
   });
 });
 
-setInterval(() => {
-  const s = Math.floor((Date.now() - startTime) / 1000);
-  $('uptime').textContent = Math.floor(s/60) + 'm ' + (s%60) + 's';
-}, 1000);
+es.addEventListener('midi_events', e => {
+  const d = JSON.parse(e.data);
+  if (!d.events) return;
+  const mon = $('midi-mon');
+  if (!mon) return;
+  for (const ev of d.events) {
+    const [status, d1, d2] = ev;
+    const type = status & 0xF0;
+    const ch = status & 0x0F;
+    /* Flash slot cell on note-on */
+    if (type === 0x90 && d2 > 0) {
+      const cell = document.querySelector('#slot-grid .slot-cell:nth-child(' + (ch+1) + ')');
+      if (cell) { cell.classList.add('trig'); setTimeout(() => cell.classList.remove('trig'), 80); }
+    }
+    /* MIDI learn capture */
+    learnFromMidiEvent(status, d1, d2);
+    const line = document.createElement('div');
+    line.className = 'mon-line';
+    if (type === 0x90 && d2 > 0) { line.className += ' mon-note'; line.textContent = `CH${ch+1} ON  ${noteName(d1)} vel=${d2}`; }
+    else if (type === 0x80 || (type === 0x90 && d2 === 0)) { line.className += ' mon-note'; line.textContent = `CH${ch+1} OFF ${noteName(d1)}`; }
+    else if (type === 0xB0) { line.className += ' mon-cc'; line.textContent = `CH${ch+1} CC${d1} = ${d2}`; }
+    else if (type === 0xE0) { line.className += ' mon-bend'; const v = d1 | (d2 << 7); line.textContent = `CH${ch+1} BEND ${v-8192}`; }
+    else { line.className += ' mon-other'; line.textContent = `CH${ch+1} 0x${status.toString(16)} ${d1} ${d2}`; }
+    mon.insertBefore(line, mon.firstChild);
+    if (mon.children.length > 100) mon.removeChild(mon.lastChild);
+  }
+});
+
+$('mon-clear')?.addEventListener('click', () => { const m = $('midi-mon'); if (m) m.innerHTML = ''; });
+$('midi-refresh')?.addEventListener('click', () => {
+  api({type:'midi_devices'}).then(() => {});
+});
+
+renderInstCC(null);
+
+/* ── MIDI Routing table ── */
+let midiRoutes = [];
+const ROUTE_MODES = ['slot', 'focused', 'off'];
+
+function renderMidiRoutes() {
+  const el = $('midi-routes');
+  if (!el || !midiRoutes.length) return;
+  el.innerHTML = '<div style="display:grid;grid-template-columns:40px 1fr 50px;gap:2px 6px;align-items:center">' +
+    '<span style="color:var(--dim)">CH</span><span style="color:var(--dim)">Route</span><span style="color:var(--dim)">Slot</span>' +
+    midiRoutes.map((r, i) => {
+      const modeColor = r.mode === 1 ? 'var(--good)' : r.mode === 2 ? 'var(--dim)' : 'var(--text)';
+      const label = r.mode === 1 ? 'focused' : r.mode === 2 ? 'off' : 'slot ' + (r.target + 1);
+      return '<span style="color:var(--accent)">' + (i+1) + '</span>' +
+        '<span style="color:' + modeColor + ';cursor:pointer" onclick="cycleRoute(' + i + ')">' + label + '</span>' +
+        '<span style="color:var(--dim)">' + (r.mode === 0 ? r.target + 1 : '—') + '</span>';
+    }).join('') + '</div>';
+}
+
+window.cycleRoute = function(ch) {
+  const r = midiRoutes[ch];
+  if (!r) return;
+  const nextMode = (r.mode + 1) % 3;
+  const mode = ROUTE_MODES[nextMode];
+  api({type:'midi_route', ch:ch, mode:mode, target:r.target}).then(() => {
+    midiRoutes[ch].mode = nextMode;
+    renderMidiRoutes();
+  });
+};
+
+/* ── MIDI Learn ── */
+const LEARN_TARGETS = [
+  {name:'Macro 1', cc:14}, {name:'Macro 2', cc:15}, {name:'Macro 3', cc:16}, {name:'Macro 4', cc:17},
+  {name:'Macro 5', cc:18}, {name:'Macro 6', cc:19}, {name:'Macro 7', cc:20}, {name:'Macro 8', cc:21},
+  {name:'Mod Wheel', cc:1},
+  {name:'Preset Prev', cc:80}, {name:'Preset Next', cc:81},
+  {name:'Scale Program', cc:82},
+  {name:'Mono Toggle', cc:83}, {name:'Legato Toggle', cc:84},
+  {name:'Instrument Prev', cc:85}, {name:'Instrument Next', cc:86},
+  {name:'Focus CH Down', cc:87}, {name:'Focus CH Up', cc:88},
+];
+
+let learnActive = -1; /* index into LEARN_TARGETS, -1 = not learning */
+let learnCCMap = {};   /* global cc_map from server */
+
+function renderLearnList() {
+  const el = $('learn-list');
+  if (!el) return;
+
+  /* Build reverse map: target_cc → from_cc */
+  const rev = {};
+  for (const [from, to] of Object.entries(learnCCMap)) {
+    if (parseInt(to) >= 0) rev[to] = parseInt(from);
+  }
+
+  el.innerHTML = LEARN_TARGETS.map((t, i) => {
+    const mapped = rev[t.cc];
+    const isLearning = learnActive === i;
+    const bg = isLearning ? 'var(--accent)' : 'var(--card)';
+    const label = mapped !== undefined ? 'CC' + mapped : '—';
+    const labelColor = mapped !== undefined ? 'var(--good)' : 'var(--dim)';
+    return '<div style="display:flex;align-items:center;gap:6px;padding:3px 6px;margin:2px 0;background:' + bg + ';border-radius:3px;cursor:pointer;font-size:10px" onclick="startLearn(' + i + ')">' +
+      '<span style="flex:1;color:var(--text)">' + t.name + '</span>' +
+      '<span style="color:' + labelColor + ';min-width:40px;text-align:right">' + label + '</span>' +
+      (mapped !== undefined ? '<span style="color:var(--accent);cursor:pointer;font-size:8px" onclick="event.stopPropagation();clearLearn(' + t.cc + ')">x</span>' : '') +
+      '</div>';
+  }).join('');
+}
+
+window.startLearn = function(idx) {
+  learnActive = (learnActive === idx) ? -1 : idx;
+  const status = $('learn-status');
+  if (status) status.textContent = learnActive >= 0 ? 'Touch a MIDI control for: ' + LEARN_TARGETS[learnActive].name : '';
+  renderLearnList();
+};
+
+window.clearLearn = function(targetCC) {
+  for (const [from, to] of Object.entries(learnCCMap)) {
+    if (parseInt(to) === targetCC) {
+      api({type:'cc_map_set', from:parseInt(from), to:-1}).then(() => {
+        delete learnCCMap[from];
+        renderLearnList();
+      });
+      return;
+    }
+  }
+};
+
+/* Capture incoming CC for learn mode */
+function learnFromMidiEvent(status, d1, d2) {
+  if (learnActive < 0) return;
+  const type = status & 0xF0;
+  if (type !== 0xB0) return; /* only CCs */
+  const target = LEARN_TARGETS[learnActive];
+  /* Clear any existing mapping to this target */
+  for (const [from, to] of Object.entries(learnCCMap)) {
+    if (parseInt(to) === target.cc) {
+      api({type:'cc_map_set', from:parseInt(from), to:-1});
+      delete learnCCMap[from];
+    }
+  }
+  /* Set new mapping */
+  api({type:'cc_map_set', from:d1, to:target.cc}).then(() => {
+    learnCCMap[d1] = target.cc;
+    learnActive = -1;
+    const st = $('learn-status');
+    if (st) st.textContent = 'Mapped CC' + d1 + ' → ' + target.name;
+    renderLearnList();
+  });
+}
+
+$('learn-clear')?.addEventListener('click', () => {
+  api({type:'cc_map_clear'}).then(() => {
+    learnCCMap = {};
+    learnActive = -1;
+    const st = $('learn-status');
+    if (st) st.textContent = '';
+    renderLearnList();
+  });
+});
+
+/* ── Web MIDI — delegates to parent shell (persists across tabs) ── */
+function renderWebMidiList() {
+  const list = $('webmidi-list');
+  const badge = $('webmidi-badge');
+  if (!list) return;
+
+  /* Access shell's Web MIDI state */
+  const parent = window.parent;
+  const access = parent?.wmAccess?.();
+  const inputs = parent?.wmInputs;
+
+  if (!access) {
+    list.innerHTML = '<div style="color:var(--dim);font-size:10px">Web MIDI not available (needs HTTPS)</div>';
+    if (badge) badge.textContent = 'N/A';
+    return;
+  }
+
+  list.innerHTML = '';
+  let count = 0;
+  if (!access.inputs.size) {
+    list.innerHTML = '<div style="color:var(--dim);font-size:10px">no browser MIDI devices</div>';
+    if (badge) badge.textContent = '0';
+    return;
+  }
+
+  for (const [id, input] of access.inputs) {
+    const connected = inputs?.has(id) && inputs.get(id).connected;
+    if (connected) count++;
+    const el = document.createElement('div');
+    el.className = 'midi-dev' + (connected ? ' connected' : '');
+    el.innerHTML = '<span class="dot"></span><span style="flex:1">' + (input.name || id) + '</span><span class="id">' + (connected ? 'on' : 'off') + '</span>';
+    el.onclick = () => {
+      if (connected) parent?.wmDisconnect?.(id);
+      else parent?.wmConnect?.(id);
+      renderWebMidiList();
+    };
+    list.appendChild(el);
+  }
+  if (badge) badge.textContent = count + '/' + access.inputs.size;
+}
+
+/* Poll to keep list in sync (shell state changes don't notify iframe) */
+setInterval(renderWebMidiList, 2000);
+renderWebMidiList();
+
+/* ── FFT ── */
+let fftRunning = true;
+let fftTimer = null;
+const fftCanvas = $('fft-canvas');
+const fftCtx = fftCanvas ? fftCanvas.getContext('2d') : null;
+
+function drawFFT(samples) {
+  if (!fftCtx || !samples.length) return;
+  const N = samples.length / 2; /* interleaved L/R, use mono mix */
+  const mono = new Float32Array(N);
+  for (let i = 0; i < N; i++) mono[i] = (samples[i*2] + samples[i*2+1]) * 0.5;
+
+  /* Simple DFT (N is small, 256 — no need for full FFT) */
+  const bins = N / 2;
+  const mag = new Float32Array(bins);
+  for (let k = 0; k < bins; k++) {
+    let re = 0, im = 0;
+    for (let n = 0; n < N; n++) {
+      const angle = -2 * Math.PI * k * n / N;
+      re += mono[n] * Math.cos(angle);
+      im += mono[n] * Math.sin(angle);
+    }
+    mag[k] = Math.sqrt(re*re + im*im) / N;
+  }
+
+  const w = fftCanvas.width, h = fftCanvas.height;
+  fftCtx.fillStyle = '#0e1525';
+  fftCtx.fillRect(0, 0, w, h);
+
+  const barW = w / bins;
+  for (let i = 0; i < bins; i++) {
+    const db = mag[i] > 0.0001 ? 20 * Math.log10(mag[i]) : -60;
+    const norm = Math.max(0, Math.min(1, (db + 60) / 60));
+    const bh = norm * h;
+    const hue = 160 - norm * 160; /* green→red */
+    fftCtx.fillStyle = `hsl(${hue},80%,50%)`;
+    fftCtx.fillRect(i * barW, h - bh, barW - 0.5, bh);
+  }
+}
+
+function fftPoll() {
+  api({type:'scope'}).then(d => {
+    if (d.samples && d.samples.length) drawFFT(d.samples);
+  }).catch(() => {});
+}
+
+/* FFT auto-starts */
+fftTimer = setInterval(fftPoll, 50);
+
+/* ── Gain test ── */
+$('gain-test-btn')?.addEventListener('click', () => {
+  const el = $('gain-results');
+  if (el) el.textContent = 'Testing...';
+  api({type:'gain_test'}).then(d => {
+    if (!d.results || !el) return;
+    el.innerHTML = d.results.map(r => {
+      const bar = Math.max(0, Math.min(100, (r.peak || 0) * 100));
+      const color = r.db > -3 ? 'var(--accent)' : r.db > -12 ? '#ffd700' : 'var(--good)';
+      return '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">' +
+        '<span style="width:80px;color:var(--text)">' + r.type + '</span>' +
+        '<div style="flex:1;height:6px;background:var(--card);border-radius:3px;overflow:hidden">' +
+          '<div style="height:100%;width:'+bar+'%;background:'+color+';border-radius:3px"></div>' +
+        '</div>' +
+        '<span style="width:50px;text-align:right;color:'+color+'">' + r.db.toFixed(1) + ' dB</span>' +
+        '<span style="width:40px;text-align:right;color:var(--dim)">' + r.peak.toFixed(3) + '</span>' +
+      '</div>';
+    }).join('');
+  });
+});
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 </script>

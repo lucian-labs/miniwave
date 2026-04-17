@@ -37,10 +37,10 @@ if (!document.getElementById('topbar') && !document.getElementById('mw-topbar'))
   `;
   Object.assign(hdr.style, {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '8px 16px', background: 'var(--panel, #1a1a2e)',
+    padding: '8px 16px', background: 'var(--panel, #111)',
     borderBottom: '1px solid var(--border, #2a2a4a)', height: '48px', flexShrink: '0',
     fontFamily: "'SF Mono','Fira Code','Cascadia Code',monospace", fontSize: '13px',
-    color: 'var(--text, #e0e0e0)'
+    color: 'var(--text, #eee)'
   });
   document.body.prepend(hdr);
 
@@ -54,10 +54,10 @@ if (!document.getElementById('topbar') && !document.getElementById('mw-topbar'))
   `;
   Object.assign(ftr.style, {
     display: 'flex', alignItems: 'center', gap: '16px',
-    padding: '4px 16px', background: 'var(--panel, #1a1a2e)',
+    padding: '4px 16px', background: 'var(--panel, #111)',
     borderTop: '1px solid var(--border, #2a2a4a)', height: '28px', flexShrink: '0',
     fontFamily: "'SF Mono','Fira Code','Cascadia Code',monospace",
-    fontSize: '10px', color: 'var(--dim, #666)'
+    fontSize: '10px', color: 'var(--dim, #aaa)'
   });
   document.body.append(ftr);
 }

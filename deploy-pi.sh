@@ -20,9 +20,9 @@ make -q 2>/dev/null || make
 LOCAL_VER=$(grep 'MINIWAVE_VERSION' "$LOCAL_DIR/common/rack.h" | head -1 | grep -o '"[^"]*"' | tr -d '"')
 echo "       local version: $LOCAL_VER"
 
-# 3. Stop old process (SIGTERM → save state → exit, SIGKILL fallback)
-echo "[3/8] Stopping old process..."
-ssh "$PI" "pkill miniwave 2>/dev/null; sleep 2; pkill -0 miniwave 2>/dev/null && pkill -9 miniwave" || true
+# 3. Stop miniwave
+echo "[3/8] Stopping miniwave..."
+ssh "$PI" "sudo systemctl stop miniwave 2>/dev/null || pkill miniwave 2>/dev/null" || true
 sleep 1
 
 # 4. Clean remote web + binary, then sync
@@ -53,9 +53,9 @@ if [ "$LOCAL_VER" != "$BIN_VER" ]; then
 fi
 echo "       binary verified: $BIN_VER"
 
-# 6. Start
+# 6. Start via systemd
 echo "[6/8] Starting miniwave..."
-ssh "$PI" "nohup $REMOTE_DIR/linux/miniwave -c 4 > /tmp/miniwave.log 2>&1 &"
+ssh "$PI" "sudo systemctl start miniwave"
 sleep 2
 
 # 7. Validate — hit the API from localhost on Pi

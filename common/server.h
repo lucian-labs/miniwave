@@ -9,6 +9,7 @@
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
@@ -72,6 +73,21 @@ static void http_load_html(void) {
 
 /* ── Build JSON responses from rack state ──────────────────────────── */
 
+static void get_host_ip(char *ip_out, int ip_max) {
+    ip_out[0] = '\0';
+    struct ifaddrs *ifa, *p;
+    if (getifaddrs(&ifa) != 0) return;
+    for (p = ifa; p; p = p->ifa_next) {
+        if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET) continue;
+        struct sockaddr_in *sa = (struct sockaddr_in *)p->ifa_addr;
+        uint32_t addr = ntohl(sa->sin_addr.s_addr);
+        if ((addr >> 24) == 127) continue; /* skip loopback */
+        inet_ntop(AF_INET, &sa->sin_addr, ip_out, (socklen_t)ip_max);
+        break;
+    }
+    freeifaddrs(ifa);
+}
+
 static int build_rack_status_json(char *buf, int max) {
     int pos = 0;
     pos += snprintf(buf + pos, (size_t)(max - pos),
@@ -84,9 +100,10 @@ static int build_rack_status_json(char *buf, int max) {
             tname = g_type_registry[slot->type_idx]->name;
 
         pos += snprintf(buf + pos, (size_t)(max - pos),
-            "%s{\"active\":%d,\"type\":\"%s\",\"volume\":%.4f,\"mute\":%d,\"solo\":%d}",
+            "%s{\"active\":%d,\"type\":\"%s\",\"volume\":%.4f,\"mute\":%d,\"solo\":%d,\"pk\":[%.3f,%.3f],\"hold\":[%.3f,%.3f]}",
             i ? "," : "", slot->active, tname, (double)slot->volume,
-            slot->mute, slot->solo);
+            slot->mute, slot->solo, (double)slot->peak_l, (double)slot->peak_r,
+            (double)slot->hold_l, (double)slot->hold_r);
     }
 
     /* Count active SSE clients */
@@ -105,7 +122,7 @@ static int build_rack_status_json(char *buf, int max) {
         "\"bus_active\":%d,\"bus_slot\":%d,"
         "\"sse_clients\":%d,\"bpm\":%.1f,"
         "\"period_size\":%d,\"sample_rate\":%d,\"audio_device\":\"%s\",\"cpu_load\":%.3f,\"version\":\"%s\","
-        "\"focused_ch\":%d}",
+        "\"focused_ch\":%d,\"master_pk\":[%.3f,%.3f],\"master_hold\":[%.3f,%.3f],",
         (double)g_rack.master_volume, esc_midi,
         g_use_jack ? "JACK" : platform_audio_fallback_name(),
         g_rack.local_mute,
@@ -114,7 +131,30 @@ static int build_rack_status_json(char *buf, int max) {
         g_bus_active, g_bus_slot,
         sse_count, (double)g_bpm,
         g_period_size, g_actual_srate, g_audio_device, (double)g_cpu_load, MINIWAVE_VERSION,
-        g_rack.focused_ch);
+        g_rack.focused_ch, (double)g_rack.master_peak_l, (double)g_rack.master_peak_r,
+        (double)g_rack.master_hold_l, (double)g_rack.master_hold_r);
+
+    /* Hostname + IP */
+    char hostname[64] = "unknown";
+    char ip[46] = "";
+    gethostname(hostname, sizeof(hostname));
+    get_host_ip(ip, sizeof(ip));
+    pos += snprintf(buf + pos, (size_t)(max - pos),
+        "\"hostname\":\"%s\",\"ip\":\"%s\",\"midi_routes\":[", hostname, ip);
+    for (int r = 0; r < 16; r++) {
+        pos += snprintf(buf + pos, (size_t)(max - pos), "%s{\"mode\":%d,\"target\":%d}",
+                r ? "," : "", g_midi_routes[r].mode, g_midi_routes[r].target);
+    }
+    pos += snprintf(buf + pos, (size_t)(max - pos), "],\"cc_map\":{");
+    int first_cc = 1;
+    for (int cc = 0; cc < CC_MAP_SIZE; cc++) {
+        if (g_cc_map[cc] >= 0) {
+            pos += snprintf(buf + pos, (size_t)(max - pos), "%s\"%d\":%d",
+                    first_cc ? "" : ",", cc, g_cc_map[cc]);
+            first_cc = 0;
+        }
+    }
+    pos += snprintf(buf + pos, (size_t)(max - pos), "}}");
 
     return pos;
 }
@@ -217,6 +257,8 @@ static int build_ch_status_json(int ch, char *buf, int max) {
             len += snprintf(buf + len, (size_t)(max - len),
                 "%s%d", c ? "," : "", slot->chord_intervals[c]);
         len += snprintf(buf + len, (size_t)(max - len), "]");
+
+        /* CC map is global now — exposed in rack_status */
 
         if (len < max - 1) buf[len++] = '}';
         buf[len] = '\0';
@@ -529,6 +571,8 @@ static void http_handle_api(int fd, const char *body) {
         int err = rack_set_slot(ch, instr);
         if (err == 0) {
             mcast_slot_set(ch, instr);
+            state_mark_dirty();
+            sse_mark_dirty();
             rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
         } else {
             rlen = snprintf(resp, sizeof(resp),
@@ -540,6 +584,8 @@ static void http_handle_api(int fd, const char *body) {
         json_get_int(body, "channel", &ch);
         rack_clear_slot(ch);
         mcast_slot_clear(ch);
+        state_mark_dirty();
+        sse_mark_dirty();
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
     else if (strcmp(type_str, "slot_volume") == 0) {
@@ -930,11 +976,58 @@ static void http_handle_api(int fd, const char *body) {
             rlen = snprintf(resp, sizeof(resp), "{\"error\":\"invalid channel\"}");
         }
     }
+    else if (strcmp(type_str, "cc_map_set") == 0) {
+        /* Global CC remap: {from, to} — to=-1 to clear */
+        int from_cc = 0, to_cc = -1;
+        json_get_int(body, "from", &from_cc);
+        json_get_int(body, "to", &to_cc);
+        if (from_cc >= 0 && from_cc < CC_MAP_SIZE) {
+            g_cc_map[from_cc] = (int8_t)to_cc;
+            state_mark_dirty();
+            sse_mark_dirty();
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"invalid\"}");
+        }
+    }
+    else if (strcmp(type_str, "cc_map_clear") == 0) {
+        memset(g_cc_map, -1, sizeof(g_cc_map));
+        state_mark_dirty();
+        sse_mark_dirty();
+        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+    }
+    else if (strcmp(type_str, "midi_route") == 0) {
+        /* Set MIDI channel routing: {ch, mode:"slot"|"focused"|"off", target:N} */
+        int mch = 0, target = 0;
+        char mode_str[16] = "";
+        json_get_int(body, "ch", &mch);
+        json_get_string(body, "mode", mode_str, sizeof(mode_str));
+        json_get_int(body, "target", &target);
+        if (mch >= 0 && mch < 16) {
+            if (strcmp(mode_str, "focused") == 0) g_midi_routes[mch].mode = MIDI_ROUTE_FOCUSED;
+            else if (strcmp(mode_str, "off") == 0) g_midi_routes[mch].mode = MIDI_ROUTE_OFF;
+            else { g_midi_routes[mch].mode = MIDI_ROUTE_SLOT; g_midi_routes[mch].target = target; }
+            state_mark_dirty();
+            sse_mark_dirty();
+            rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"error\":\"invalid ch\"}");
+        }
+    }
     else if (strcmp(type_str, "quit") == 0) {
-        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true,\"msg\":\"shutting down\"}");
+        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true,\"msg\":\"restarting\"}");
         http_send_response(fd, 200, "application/json", resp, rlen);
         state_save();
         g_quit = 1;
+        return;
+    }
+    else if (strcmp(type_str, "shutdown") == 0) {
+        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true,\"msg\":\"powering off\"}");
+        http_send_response(fd, 200, "application/json", resp, rlen);
+        state_save();
+        g_quit = 1;
+        /* Give time for response to send, then poweroff */
+        system("sleep 1 && sudo poweroff &");
         return;
     }
     else if (strcmp(type_str, "focus_ch") == 0) {
@@ -1609,6 +1702,62 @@ static void http_handle_api(int fd, const char *body) {
         fprintf(stderr, "[miniwave] PANIC — all notes off, all keyseqs stopped\n");
         rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
     }
+    else if (strcmp(type_str, "peak_reset") == 0) {
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            g_rack.slots[i].hold_l = 0; g_rack.slots[i].hold_r = 0;
+        }
+        g_rack.master_hold_l = 0; g_rack.master_hold_r = 0;
+        rlen = snprintf(resp, sizeof(resp), "{\"ok\":true}");
+    }
+    else if (strcmp(type_str, "scope") == 0) {
+        /* Return scope buffer as JSON array of floats (interleaved L/R) */
+        if (g_rack.scope_ready) {
+            int pos2 = 0;
+            pos2 += snprintf(resp + pos2, sizeof(resp) - (size_t)pos2, "{\"samples\":[");
+            for (int i = 0; i < SCOPE_SIZE * 2; i++) {
+                pos2 += snprintf(resp + pos2, sizeof(resp) - (size_t)pos2,
+                    "%s%.4f", i ? "," : "", (double)g_rack.scope_buf[i]);
+                if (pos2 > (int)sizeof(resp) - 16) break;
+            }
+            pos2 += snprintf(resp + pos2, sizeof(resp) - (size_t)pos2, "]}");
+            rlen = pos2;
+            g_rack.scope_ready = 0;
+        } else {
+            rlen = snprintf(resp, sizeof(resp), "{\"samples\":[]}");
+        }
+    }
+    else if (strcmp(type_str, "gain_test") == 0) {
+        /* Test all instruments for volume consistency */
+        float test_buf[512 * 2];
+        int pos2 = snprintf(resp, sizeof(resp), "{\"type\":\"gain_test\",\"results\":[");
+        for (int t = 0; t < g_n_types; t++) {
+            InstrumentType *itype = g_type_registry[t];
+            void *st = calloc(1, itype->state_size);
+            if (!st) continue;
+            if (itype->init) itype->init(st);
+            /* Play middle C (60) at max velocity */
+            itype->midi(st, 0x90, 60, 127);
+            /* Render 512 samples (~10ms at 48kHz) */
+            memset(test_buf, 0, sizeof(test_buf));
+            itype->render(st, test_buf, 512, 48000);
+            /* Measure peak */
+            float pk = 0;
+            for (int j = 0; j < 512 * 2; j++) {
+                float a = fabsf(test_buf[j]);
+                if (a > pk) pk = a;
+            }
+            /* Note off + cleanup */
+            itype->midi(st, 0x80, 60, 0);
+            if (itype->destroy) itype->destroy(st);
+            free(st);
+            float db = (pk > 0.0001f) ? 20.0f * log10f(pk) : -100.0f;
+            pos2 += snprintf(resp + pos2, sizeof(resp) - (size_t)pos2,
+                "%s{\"type\":\"%s\",\"peak\":%.4f,\"db\":%.1f}",
+                t ? "," : "", itype->name, (double)pk, (double)db);
+        }
+        pos2 += snprintf(resp + pos2, sizeof(resp) - (size_t)pos2, "]}");
+        rlen = pos2;
+    }
     else if (strcmp(type_str, "debug_lifetime") == 0) {
         rlen = snprintf(resp, sizeof(resp),
             "{\"slot_readers\":%d,"
@@ -1787,6 +1936,8 @@ static void *http_thread_fn(void *arg) {
                 else if (strcmp(method, "GET") == 0 &&
                          (strcmp(path, "/manifest.json") == 0 ||
                           strcmp(path, "/icon.svg") == 0 ||
+                          strcmp(path, "/icon-192.png") == 0 ||
+                          strcmp(path, "/icon-512.png") == 0 ||
                           strcmp(path, "/sw.js") == 0 ||
                           strcmp(path, "/chrome.js") == 0)) {
                     /* Serve PWA static files */
@@ -1805,6 +1956,7 @@ static void *http_thread_fn(void *arg) {
                                 const char *ct = "application/octet-stream";
                                 if (strstr(path, ".json")) ct = "application/json";
                                 else if (strstr(path, ".svg")) ct = "image/svg+xml";
+                                else if (strstr(path, ".png")) ct = "image/png";
                                 else if (strstr(path, ".js")) ct = "application/javascript";
                                 http_send_response(client_fd, 200, ct, data, (int)rd);
                                 free(data);
@@ -1841,12 +1993,60 @@ static void *http_thread_fn(void *arg) {
                     }
                     close(client_fd);
                 }
+                else if (strcmp(method, "GET") == 0 && strcmp(path, "/rack") == 0) {
+                    char exe_dir[1024];
+                    if (platform_exe_dir(exe_dir, sizeof(exe_dir)) == 0) {
+                        char fpath[1280];
+                        snprintf(fpath, sizeof(fpath), "%sweb/rack.html", exe_dir);
+                        FILE *f = fopen(fpath, "r");
+                        if (f) {
+                            fseek(f, 0, SEEK_END);
+                            long sz = ftell(f);
+                            fseek(f, 0, SEEK_SET);
+                            char *data = malloc((size_t)sz);
+                            if (data) {
+                                size_t rd = fread(data, 1, (size_t)sz, f);
+                                http_send_response(client_fd, 200, "text/html; charset=utf-8",
+                                                   data, (int)rd);
+                                free(data);
+                            }
+                            fclose(f);
+                        } else {
+                            http_send_response(client_fd, 404, "text/plain", "Not Found", 9);
+                        }
+                    }
+                    close(client_fd);
+                }
                 else if (strcmp(method, "GET") == 0 && strcmp(path, "/keyseq") == 0) {
                     /* Serve keyseq.html from web/ dir */
                     char exe_dir[1024];
                     if (platform_exe_dir(exe_dir, sizeof(exe_dir)) == 0) {
                         char fpath[1280];
                         snprintf(fpath, sizeof(fpath), "%sweb/keyseq.html", exe_dir);
+                        FILE *f = fopen(fpath, "r");
+                        if (f) {
+                            fseek(f, 0, SEEK_END);
+                            long sz = ftell(f);
+                            fseek(f, 0, SEEK_SET);
+                            char *data = malloc((size_t)sz);
+                            if (data) {
+                                size_t rd = fread(data, 1, (size_t)sz, f);
+                                http_send_response(client_fd, 200, "text/html; charset=utf-8",
+                                                   data, (int)rd);
+                                free(data);
+                            }
+                            fclose(f);
+                        } else {
+                            http_send_response(client_fd, 404, "text/plain", "Not Found", 9);
+                        }
+                    }
+                    close(client_fd);
+                }
+                else if (strcmp(method, "GET") == 0 && strcmp(path, "/viz") == 0) {
+                    char exe_dir[1024];
+                    if (platform_exe_dir(exe_dir, sizeof(exe_dir)) == 0) {
+                        char fpath[1280];
+                        snprintf(fpath, sizeof(fpath), "%sweb/viz.html", exe_dir);
                         FILE *f = fopen(fpath, "r");
                         if (f) {
                             fseek(f, 0, SEEK_END);

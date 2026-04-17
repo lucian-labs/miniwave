@@ -292,7 +292,7 @@ static void pd_render(void *state, float *stereo_buf, int frames, int sample_rat
             while (v->phase >= 1.0f) v->phase -= 1.0f;
         }
 
-        mix *= s->volume;
+        mix *= s->volume * 0.80f;
         if (mix > 0.95f) mix = 0.95f;
         if (mix < -0.95f) mix = -0.95f;
         stereo_buf[i * 2] = mix;
@@ -343,10 +343,12 @@ static int pd_json_status(void *state, char *buf, int max) {
         "\"instrument_type\":\"phase-dist\","
         "\"mode\":\"%s\",\"mode_index\":%d,"
         "\"params\":{"
+        "\"mode\":%d,"
         "\"distortion\":%.4f,\"timbre\":%.4f,\"color\":%.4f,"
         "\"attack\":%.4f,\"decay\":%.4f,\"sustain\":%.4f,\"release\":%.4f},"
         "\"active_voices\":%d",
         modes[s->mode], s->mode,
+        s->mode,
         (double)s->distortion, (double)s->timbre, (double)s->color,
         (double)s->attack, (double)s->decay, (double)s->sustain, (double)s->release,
         active);

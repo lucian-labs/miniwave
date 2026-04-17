@@ -15,7 +15,7 @@
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
 * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
 :root {
-  --bg: #0d0d0d; --panel: #1a1a2e; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #e0e0e0; --dim: #666; --border: #2a2a4a;
+  --bg: #0d0d0d; --panel: #111; --card: #0e1525; --accent: #e94560; --good: #00d4aa; --text: #eee; --dim: #aaa; --border: #2a2a4a;
   --hw-shadow:
     rgba(255,255,255,0.18) 0 1px 1px 0 inset,
     rgba(0,0,0,0.7) 0 -1px 1px 0 inset,
@@ -150,25 +150,6 @@ button.send { background: var(--good); color: #000; }
 
 <div id="page">
 
-<div id="header">
-  <h1><a href="/" style="color:var(--accent);text-decoration:none">miniwave</a> / <span style="color:#8866cc">keyseq</span> / <a href="/effex" style="color:#00d4aa;text-decoration:none;font-size:16px">effex</a> / <a href="/chords" style="color:#ff8800;text-decoration:none;font-size:16px">chords</a> / <a href="/config" style="color:#666;text-decoration:none;font-size:16px">cfg</a> <span id="mw-ver" style="color:var(--dim);font-size:10px;font-weight:normal"></span></h1>
-  <div class="ch-nav">
-    <button id="ch-prev" title="Prev channel (Cmd+[)">&lsaquo;</button>
-    <span class="ch-label" id="ch-label">CH 1</span>
-    <button id="ch-next" title="Next channel (Cmd+])">&rsaquo;</button>
-  </div>
-  <div id="seq-enable" class="tog-btn" onclick="toggleSeqEnable()" title="Enable/disable keyseq on channel" style="padding:3px 8px;font-size:10px;cursor:pointer">OFF</div>
-  <span id="inst-badge" style="color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:0.5px"></span>
-  <div class="bpm-group">
-    <input type="text" id="bpm-input" value="120">
-    <span class="bpm-label">bpm</span>
-    <button class="tap-btn" id="tap-btn">TAP</button>
-  </div>
-  <div class="midi-sel">
-    <label>MIDI</label>
-    <select id="midi-select"><option value="">No Device</option></select>
-  </div>
-</div>
 
 <div id="columns">
 
@@ -342,7 +323,7 @@ function toggleExpr(btn) {
   const k = btn.dataset.expr;
   exprEnabled[k] = !exprEnabled[k];
   btn.classList.toggle('on', exprEnabled[k]);
-  document.getElementById('row-' + k).classList.toggle('disabled', !exprEnabled[k]);
+  document.getElementById('row-' + k)?.classList.toggle('disabled', !exprEnabled[k]);
   autoSave(); simulate();
 }
 
@@ -350,7 +331,7 @@ function syncExprToggles() {
   for (const k of ['n','v','t','g']) {
     const btn = document.querySelector(`.tog-btn[data-expr="${k}"]`);
     if (btn) btn.classList.toggle('on', exprEnabled[k]);
-    document.getElementById('row-' + k).classList.toggle('disabled', !exprEnabled[k]);
+    document.getElementById('row-' + k)?.classList.toggle('disabled', !exprEnabled[k]);
   }
 }
 
@@ -364,19 +345,22 @@ function toggleMode(cbId) {
 
 function setInputMode(mode) {
   const isAlgo = mode === 'algo';
-  document.getElementById('cb-algo').checked = isAlgo;
+  const cbAlgo = document.getElementById('cb-algo');
+  if (cbAlgo) cbAlgo.checked = isAlgo;
   syncModeButtons();
   autoSave(); simulate();
 }
 
 function syncModeButtons() {
-  document.getElementById('btn-gated').classList.toggle('on', document.getElementById('cb-gated').checked);
-  document.getElementById('btn-loop').classList.toggle('on', document.getElementById('cb-loop').checked);
-  const isAlgo = document.getElementById('cb-algo').checked;
-  document.getElementById('pill-algo').classList.toggle('on', isAlgo);
-  document.getElementById('pill-offsets').classList.toggle('on', !isAlgo);
-  document.getElementById('algo-section').style.display = isAlgo ? '' : 'none';
-  document.getElementById('offsets-section').style.display = isAlgo ? 'none' : '';
+  document.getElementById('btn-gated')?.classList.toggle('on', !!document.getElementById('cb-gated')?.checked);
+  document.getElementById('btn-loop')?.classList.toggle('on', !!document.getElementById('cb-loop')?.checked);
+  const isAlgo = !!document.getElementById('cb-algo')?.checked;
+  document.getElementById('pill-algo')?.classList.toggle('on', isAlgo);
+  document.getElementById('pill-offsets')?.classList.toggle('on', !isAlgo);
+  const algoSec = document.getElementById('algo-section');
+  if (algoSec) algoSec.style.display = isAlgo ? '' : 'none';
+  const offSec = document.getElementById('offsets-section');
+  if (offSec) offSec.style.display = isAlgo ? 'none' : '';
 }
 
 /* ── Channel navigation ── */
@@ -396,8 +380,10 @@ function setCh(ch) {
 function updateChLabel() {
   const s = rackSlots[activeCh];
   const info = s && s.active ? s.type : '';
-  document.getElementById('ch-label').textContent = `CH ${activeCh + 1}`;
-  document.getElementById('inst-badge').textContent = info;
+  const chl = document.getElementById('ch-label');
+  if (chl) chl.textContent = `CH ${activeCh + 1}`;
+  const ib = document.getElementById('inst-badge');
+  if (ib) ib.textContent = info;
   updateParamIndex();
 }
 
@@ -409,8 +395,8 @@ function toggleSeqEnable() {
   tog.textContent = enabling ? 'ON' : 'OFF';
 }
 
-document.getElementById('ch-prev').addEventListener('click', () => setCh(activeCh - 1));
-document.getElementById('ch-next').addEventListener('click', () => setCh(activeCh + 1));
+document.getElementById('ch-prev')?.addEventListener('click', () => setCh(activeCh - 1));
+document.getElementById('ch-next')?.addEventListener('click', () => setCh(activeCh + 1));
 
 /* Cmd+[ and Cmd+] for channel nav (global) */
 document.addEventListener('keydown', (e) => {
@@ -443,9 +429,11 @@ function buildPresetBar() {
 
 function selectPreset(p) {
   activePreset = p.name;
-  document.getElementById('preset-name').value = p.name;
+  const pn = document.getElementById('preset-name');
+  if (pn) pn.value = p.name;
   /* Load DSL into textarea and push to server */
-  document.getElementById('dsl-output').value = p.dsl;
+  const dslEl = document.getElementById('dsl-output');
+  if (dslEl) dslEl.value = p.dsl;
   parseDSLToForm(p.dsl);
   sendDSL();
   schedulePreview();
@@ -455,35 +443,37 @@ function selectPreset(p) {
 function parseDSLToForm(dsl) {
   /* Parse DSL string back into form fields */
   const parts = dsl.split(';').map(s => s.trim()).filter(Boolean);
+  const _sv = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+  const _sc = (id, v) => { const e = document.getElementById(id); if (e) e.checked = v; };
   /* Reset form to defaults */
-  document.getElementById('step-t').value = '0.125';
-  document.getElementById('gate-t').value = '';
-  document.getElementById('cb-gated').checked = false;
-  document.getElementById('cb-loop').checked = false;
-  document.getElementById('cb-algo').checked = false;
-  document.getElementById('expr-n').value = '';
-  document.getElementById('expr-v').value = '';
-  document.getElementById('expr-t').value = '';
-  document.getElementById('expr-g').value = '';
-  document.getElementById('expr-frame').value = '';
-  document.getElementById('expr-end').value = '';
-  document.getElementById('seed-input').value = '';
+  _sv('step-t', '0.125');
+  _sv('gate-t', '');
+  _sc('cb-gated', false);
+  _sc('cb-loop', false);
+  _sc('cb-algo', false);
+  _sv('expr-n', '');
+  _sv('expr-v', '');
+  _sv('expr-t', '');
+  _sv('expr-g', '');
+  _sv('expr-frame', '');
+  _sv('expr-end', '');
+  _sv('seed-input', '');
   exprEnabled.n = false; exprEnabled.v = false; exprEnabled.t = false; exprEnabled.g = false;
   activeParams.seq = {}; activeParams.elem = {};
 
   for (const part of parts) {
-    if (part === 'gated') { document.getElementById('cb-gated').checked = true; }
-    else if (part === 'loop') { document.getElementById('cb-loop').checked = true; }
-    else if (part === 'algo') { document.getElementById('cb-algo').checked = true; }
-    else if (part.startsWith('t') && !part.includes(':')) { document.getElementById('step-t').value = part.slice(1); }
-    else if (part.startsWith('g') && !part.includes(':') && part !== 'gated') { document.getElementById('gate-t').value = part.slice(1); }
-    else if (part.startsWith('n:')) { document.getElementById('expr-n').value = part.slice(2); exprEnabled.n = true; }
-    else if (part.startsWith('v:') && part.length > 2 && !/^\d/.test(part[2])) { document.getElementById('expr-v').value = part.slice(2); exprEnabled.v = true; }
-    else if (part.startsWith('t:')) { document.getElementById('expr-t').value = part.slice(2); exprEnabled.t = true; }
-    else if (part.startsWith('g:')) { document.getElementById('expr-g').value = part.slice(2); exprEnabled.g = true; }
-    else if (part.startsWith('frame:')) { document.getElementById('expr-frame').value = part.slice(6); }
-    else if (part.startsWith('end:')) { document.getElementById('expr-end').value = part.slice(4); }
-    else if (part.startsWith('seed:')) { document.getElementById('seed-input').value = part.slice(5); }
+    if (part === 'gated') { _sc('cb-gated', true); }
+    else if (part === 'loop') { _sc('cb-loop', true); }
+    else if (part === 'algo') { _sc('cb-algo', true); }
+    else if (part.startsWith('t') && !part.includes(':')) { _sv('step-t', part.slice(1)); }
+    else if (part.startsWith('g') && !part.includes(':') && part !== 'gated') { _sv('gate-t', part.slice(1)); }
+    else if (part.startsWith('n:')) { _sv('expr-n', part.slice(2)); exprEnabled.n = true; }
+    else if (part.startsWith('v:') && part.length > 2 && !/^\d/.test(part[2])) { _sv('expr-v', part.slice(2)); exprEnabled.v = true; }
+    else if (part.startsWith('t:')) { _sv('expr-t', part.slice(2)); exprEnabled.t = true; }
+    else if (part.startsWith('g:')) { _sv('expr-g', part.slice(2)); exprEnabled.g = true; }
+    else if (part.startsWith('frame:')) { _sv('expr-frame', part.slice(6)); }
+    else if (part.startsWith('end:')) { _sv('expr-end', part.slice(4)); }
+    else if (part.startsWith('seed:')) { _sv('seed-input', part.slice(5)); }
   }
   syncModeButtons();
   syncExprToggles();
@@ -491,7 +481,7 @@ function parseDSLToForm(dsl) {
 }
 
 /* Rename */
-document.getElementById('preset-name').addEventListener('change', (e) => {
+document.getElementById('preset-name')?.addEventListener('change', (e) => {
   const newName = e.target.value.trim();
   if (!newName || newName === activePreset) return;
   if (!activePreset) return;
@@ -502,10 +492,10 @@ document.getElementById('preset-name').addEventListener('change', (e) => {
 });
 
 /* Save / Duplicate */
-document.getElementById('preset-add').addEventListener('click', () => {
-  const dsl = document.getElementById('dsl-output').value.trim();
+document.getElementById('preset-add')?.addEventListener('click', () => {
+  const dsl = document.getElementById('dsl-output')?.value?.trim() || '';
   if (!dsl) return;
-  const name = document.getElementById('preset-name').value.trim() || 'Preset ' + (presets.length + 1);
+  const name = document.getElementById('preset-name')?.value?.trim() || 'Preset ' + (presets.length + 1);
   postAPI({type:'keyseq_preset_save', name, dsl}).then(() => {
     activePreset = name;
     loadServerPresets();
@@ -513,12 +503,13 @@ document.getElementById('preset-add').addEventListener('click', () => {
 });
 
 /* Delete */
-document.getElementById('preset-del').addEventListener('click', () => {
+document.getElementById('preset-del')?.addEventListener('click', () => {
   if (!activePreset) return;
   if (!confirm(`Delete "${activePreset}"?`)) return;
   postAPI({type:'keyseq_preset_delete', name:activePreset}).then(() => {
     activePreset = '';
-    document.getElementById('preset-name').value = '';
+    const pn = document.getElementById('preset-name');
+    if (pn) pn.value = '';
     loadServerPresets();
   }).catch(() => {});
 });
@@ -545,11 +536,11 @@ for (const id of ['expr-n','expr-v','expr-t','expr-g','expr-frame','expr-end']) 
 
 /* ── Build DSL ── */
 function buildDSL() {
-  const t = document.getElementById('step-t').value.trim();
-  const g = document.getElementById('gate-t').value.trim();
-  const gated = document.getElementById('cb-gated').checked;
-  const loop = document.getElementById('cb-loop').checked;
-  const algo = document.getElementById('cb-algo').checked;
+  const t = (document.getElementById('step-t')?.value || '').trim();
+  const g = (document.getElementById('gate-t')?.value || '').trim();
+  const gated = !!document.getElementById('cb-gated')?.checked;
+  const loop = !!document.getElementById('cb-loop')?.checked;
+  const algo = !!document.getElementById('cb-algo')?.checked;
 
   let parts = [];
   if (t) parts.push('t' + t);
@@ -561,12 +552,12 @@ function buildDSL() {
     parts.push('algo');
     for (const k of ['n','v','t','g']) {
       if (!exprEnabled[k]) continue;
-      const val = document.getElementById('expr-' + k).value.trim();
+      const val = (document.getElementById('expr-' + k)?.value || '').trim();
       if (val) parts.push(k + ':' + val);
     }
   } else {
-    const offsets = document.getElementById('offsets').value.trim();
-    const levels = document.getElementById('levels').value.trim();
+    const offsets = (document.getElementById('offsets')?.value || '').trim();
+    const levels = (document.getElementById('levels')?.value || '').trim();
     if (offsets) parts.push(offsets);
     if (levels) parts.push('v' + levels);
   }
@@ -576,7 +567,7 @@ function buildDSL() {
     if (val.trim()) parts.push(name + ':' + val.trim());
   }
 
-  const frame = document.getElementById('expr-frame').value.trim();
+  const frame = (document.getElementById('expr-frame')?.value || '').trim();
   if (frame) parts.push('frame:' + frame);
 
   /* Element param expressions (per-frame) */
@@ -584,10 +575,10 @@ function buildDSL() {
     if (val.trim()) parts.push(name + ':' + val.trim());
   }
 
-  const end = document.getElementById('expr-end').value.trim();
+  const end = (document.getElementById('expr-end')?.value || '').trim();
   if (end) parts.push('end:' + end);
 
-  const seed = document.getElementById('seed-input').value.trim();
+  const seed = (document.getElementById('seed-input')?.value || '').trim();
   if (seed) parts.push('seed:' + seed);
 
   return parts.join('; ');
@@ -606,7 +597,8 @@ function schedulePreview() {
 
 function simulate() {
   const dsl = buildDSL();
-  document.getElementById('dsl-output').value = dsl;
+  const dslEl = document.getElementById('dsl-output');
+  if (dslEl) dslEl.value = dsl;
   const seq = ++_dslSeq;
   sendDSL().then(() => { if (seq === _dslSeq) schedulePreview(); });
 }
@@ -616,19 +608,19 @@ async function fetchPreview() {
     const r = await postAPI({
       type: 'keyseq_preview',
       channel: activeCh,
-      note: parseNoteName(document.getElementById('root-note').value),
-      velocity: parseInt(document.getElementById('root-vel').value) || 100
+      note: parseNoteName(document.getElementById('root-note')?.value || 'C4'),
+      velocity: parseInt(document.getElementById('root-vel')?.value) || 100
     });
     const data = await r.json();
     if (data.error) {
-      document.getElementById('preview').innerHTML =
-        `<div style="color:var(--dim)">${data.error}</div>`;
+      const pv = document.getElementById('preview');
+      if (pv) pv.innerHTML = `<div style="color:var(--dim)">${data.error}</div>`;
       return;
     }
     renderPreview(data);
   } catch(e) {
-    document.getElementById('preview').innerHTML =
-      `<div style="color:var(--accent)">preview: ${e.message}</div>`;
+    const pv = document.getElementById('preview');
+    if (pv) pv.innerHTML = `<div style="color:var(--accent)">preview: ${e.message}</div>`;
   }
 }
 
@@ -636,14 +628,14 @@ function renderPreview(data) {
   if (!data || !data.steps) return;
 
   /* Sync server state into UI */
-  if (data.bpm) document.getElementById('bpm-input').value = Math.round(data.bpm);
-  if (data.dsl && !document.getElementById('dsl-output').value.trim()) {
-    document.getElementById('dsl-output').value = data.dsl;
-  }
-  document.getElementById('seed-resolved').textContent = data.seed != null ? `seed=${data.seed}` : '';
+  if (data.bpm) { const bi = document.getElementById('bpm-input'); if (bi) bi.value = Math.round(data.bpm); }
+  if (data.dsl) { const dslEl = document.getElementById('dsl-output'); if (dslEl && !dslEl.value.trim()) dslEl.value = data.dsl; }
+  const sr = document.getElementById('seed-resolved');
+  if (sr) sr.textContent = data.seed != null ? `seed=${data.seed}` : '';
 
   const flags = [data.algo ? 'algo' : 'offsets', data.gated ? 'gated' : '', data.loop ? 'loop' : ''].filter(Boolean).join(' ');
-  document.getElementById('preview-stats').textContent = `${data.total_beats.toFixed(2)}B ${data.total_steps}S ${flags}`;
+  const ps = document.getElementById('preview-stats');
+  if (ps) ps.textContent = `${data.total_beats.toFixed(2)}B ${data.total_steps}S ${flags}`;
   let html = `<div class="pv-header"><span class="pv-col-i">#</span><span class="pv-col-n">note</span><span class="pv-col-v">vel</span><span class="pv-col-t">t</span><span class="pv-col-g">g</span><span class="pv-col-b">beat</span><span class="pv-col-x"></span></div>`;
   for (const s of data.steps) {
     const fc = (s.frame_cents != null && s.frame_cents !== 0) ? s.frame_cents : null;
@@ -658,7 +650,8 @@ function renderPreview(data) {
     html += `<div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px;color:var(--dim);font-size:9px">${footer.join(' &nbsp; ')}</div>`;
   }
 
-  document.getElementById('preview').innerHTML = html;
+  const pvEl = document.getElementById('preview');
+  if (pvEl) pvEl.innerHTML = html;
   updateParamIndex();
 }
 
@@ -716,9 +709,7 @@ async function fetchSpec() {
       const tog = document.getElementById('seq-enable');
       if (tog) tog.classList.toggle('on', !!ks.enabled);
       /* If server has a DSL loaded and our textarea is empty, populate from server */
-      if (ks.dsl && !document.getElementById('dsl-output').value.trim()) {
-        document.getElementById('dsl-output').value = ks.dsl;
-      }
+      if (ks.dsl) { const dslEl = document.getElementById('dsl-output'); if (dslEl && !dslEl.value.trim()) dslEl.value = ks.dsl; }
     }
   } catch(e) {
     updateParamIndex();
@@ -734,7 +725,7 @@ async function postAPI(payload) {
 }
 
 function sendDSL() {
-  const dsl = document.getElementById('dsl-output').value.trim();
+  const dsl = (document.getElementById('dsl-output')?.value || '').trim();
   return postAPI({type:'keyseq_dsl', channel:activeCh, dsl}).catch(() => {});
 }
 
@@ -743,8 +734,8 @@ let _noteOffTimer = null;
 
 async function playPreview() {
   await stopPreview();
-  const note = parseNoteName(document.getElementById('root-note').value);
-  const vel = parseInt(document.getElementById('root-vel').value) || 100;
+  const note = parseNoteName(document.getElementById('root-note')?.value || 'C4');
+  const vel = parseInt(document.getElementById('root-vel')?.value) || 100;
   const status = document.getElementById('status');
   try {
     await sendDSL();
@@ -763,7 +754,8 @@ async function stopPreview() {
     _playingNote = -1;
     try { await postAPI({type:'note_off', channel:activeCh, note}); } catch(e) {}
   }
-  document.getElementById('status').textContent = '';
+  const stEl = document.getElementById('status');
+  if (stEl) stEl.textContent = '';
 }
 
 /* ── Param index ── */
@@ -772,14 +764,15 @@ const activeParams = { seq: {}, elem: {} }; /* { paramName: exprValue } */
 
 function setParamTarget(target) {
   paramTarget = target;
-  document.getElementById('pill-param-seq').classList.toggle('on', target === 'seq');
-  document.getElementById('pill-param-elem').classList.toggle('on', target === 'elem');
+  document.getElementById('pill-param-seq')?.classList.toggle('on', target === 'seq');
+  document.getElementById('pill-param-elem')?.classList.toggle('on', target === 'elem');
 }
 
 function updateParamIndex(specInst, currentValues) {
   /* Determine instrument name — prefer spec, fall back to rack SSE */
   const instName = specInst || ((rackSlots[activeCh] && rackSlots[activeCh].active) ? rackSlots[activeCh].type : '');
-  document.getElementById('param-inst-name').textContent = instName;
+  const pin = document.getElementById('param-inst-name');
+  if (pin) pin.textContent = instName;
   const list = document.getElementById('param-list');
   const schema = instSchemas[instName];
   const params = schema ? schema.params : [];
@@ -855,7 +848,7 @@ function renderParamRows() {
 }
 
 /* ── MIDI select ── */
-document.getElementById('midi-select').addEventListener('change', (e) => {
+document.getElementById('midi-select')?.addEventListener('change', (e) => {
   const prev = e.target._prev || '';
   postAPI({type:'midi_device', value:e.target.value}).then(() => {
     e.target._prev = e.target.value;
@@ -899,8 +892,9 @@ function connectSSE() {
     }
 
     /* Sync BPM from server */
-    if (d.bpm && document.activeElement !== document.getElementById('bpm-input')) {
-      document.getElementById('bpm-input').value = Math.round(d.bpm);
+    const bpmEl = document.getElementById('bpm-input');
+    if (d.bpm && bpmEl && document.activeElement !== bpmEl) {
+      bpmEl.value = Math.round(d.bpm);
     }
 
     /* Sync version */
@@ -951,7 +945,7 @@ connectSSE();
 /* ── BPM + Tap Tempo ── */
 let tapTimes = [];
 
-document.getElementById('tap-btn').addEventListener('click', () => {
+document.getElementById('tap-btn')?.addEventListener('click', () => {
   const now = performance.now();
   tapTimes.push(now);
   /* Keep last 8 taps, discard if gap > 3s */
@@ -964,14 +958,15 @@ document.getElementById('tap-btn').addEventListener('click', () => {
     for (let i = 1; i < tapTimes.length; i++) total += tapTimes[i] - tapTimes[i-1];
     const avg = total / (tapTimes.length - 1);
     const bpm = Math.round(60000 / avg);
-    document.getElementById('bpm-input').value = bpm;
+    const bi = document.getElementById('bpm-input');
+    if (bi) bi.value = bpm;
     postAPI({type:'bpm', value:bpm}).catch(() => {});
   }
 });
 
-document.getElementById('bpm-input').addEventListener('input', () => {
+document.getElementById('bpm-input')?.addEventListener('input', () => {
   tapTimes = [];
-  const v = parseInt(document.getElementById('bpm-input').value);
+  const v = parseInt(document.getElementById('bpm-input')?.value);
   if (v > 0) postAPI({type:'bpm', value:v}).catch(() => {});
 });
 

@@ -8,7 +8,7 @@
 #ifndef MINIWAVE_RACK_H
 #define MINIWAVE_RACK_H
 
-#define MINIWAVE_VERSION "0.6.3"
+#define MINIWAVE_VERSION "0.12.0"
 
 #include <errno.h>
 #include <math.h>
@@ -57,8 +57,8 @@
 /* ── HTTP / SSE Server Constants ───────────────────────────────────── */
 
 #define MAX_HTTP_CLIENTS  16
-#define HTTP_BUF_SIZE     8192
-#define SSE_BUF_SIZE      16384
+#define HTTP_BUF_SIZE     16384
+#define SSE_BUF_SIZE      32768
 
 /* ── Shared Memory Bus ──────────────────────────────────────────────── */
 
@@ -87,6 +87,42 @@ static void sighandler(int sig) {
     (void)sig;
     g_quit = 1;
 }
+
+/* ── MIDI channel routing ───────────────────────────────────────────── */
+/* Each incoming MIDI channel routes to a destination:
+ *   mode=0 "slot"    → fixed slot (target = slot index)
+ *   mode=1 "focused" → follows g_rack.focused_ch
+ *   mode=2 "off"     → ignore this channel
+ * Default: mode=0, target=ch (legacy 1:1 mapping)
+ */
+#define MIDI_ROUTE_SLOT    0
+#define MIDI_ROUTE_FOCUSED 1
+#define MIDI_ROUTE_OFF     2
+
+typedef struct {
+    int mode;    /* MIDI_ROUTE_* */
+    int target;  /* slot index (for SLOT mode) */
+} MidiRoute;
+
+static MidiRoute g_midi_routes[16];
+
+/* Global CC remap table: g_cc_map[input_cc] = output_cc (-1 = pass-through) */
+#define CC_MAP_SIZE 128
+static int8_t g_cc_map[CC_MAP_SIZE];
+
+static void cc_map_init(void) {
+    memset(g_cc_map, -1, sizeof(g_cc_map));
+}
+
+static void midi_routes_init(void) {
+    for (int i = 0; i < 16; i++) {
+        g_midi_routes[i].mode = MIDI_ROUTE_SLOT;
+        g_midi_routes[i].target = i;
+    }
+}
+
+/* Forward declaration — defined after g_rack */
+static inline int midi_route_resolve(int midi_ch);
 
 /* ── Audio backend flag (set at startup) ────────────────────────────── */
 
@@ -204,8 +240,15 @@ static inline float master_limiter(float sample) {
 
     sample *= gain;
 
-    if (fabsf(sample) > LIMITER_THRESHOLD) {
-        sample = tanhf(sample) * LIMITER_CEILING;
+    /* Soft clip — smooth knee at threshold, asymptotic to ceiling.
+     * Linear below threshold, tanh-shaped saturation above.
+     * Continuous first derivative at the knee. */
+    float ax = fabsf(sample);
+    if (ax > LIMITER_THRESHOLD) {
+        float over = ax - LIMITER_THRESHOLD;
+        float knee = LIMITER_CEILING - LIMITER_THRESHOLD;
+        float soft = LIMITER_THRESHOLD + knee * tanhf(over / knee);
+        sample = (sample > 0.0f) ? soft : -soft;
     }
 
     return sample;
@@ -239,11 +282,24 @@ static int rack_find_type(const char *name) {
 /* ── Rack Management ────────────────────────────────────────────────── */
 
 static Rack g_rack;
+
+/* Resolve a MIDI channel to a rack slot index */
+static inline int midi_route_resolve(int midi_ch) {
+    if (midi_ch < 0 || midi_ch >= 16) return -1;
+    MidiRoute *r = &g_midi_routes[midi_ch];
+    switch (r->mode) {
+    case MIDI_ROUTE_FOCUSED: return g_rack.focused_ch;
+    case MIDI_ROUTE_OFF:     return -1;
+    default:                 return r->target;
+    }
+}
 static char g_midi_device_name[128] = "";
 
 static void rack_init(void) {
     memset(&g_rack, 0, sizeof(g_rack));
     g_rack.master_volume = 0.8f;
+    midi_routes_init();
+    cc_map_init();
     for (int i = 0; i < MAX_SLOTS; i++) {
         g_rack.slots[i].active = 0;
         g_rack.slots[i].type_idx = -1;
@@ -674,8 +730,22 @@ static void state_save(void) {
     FILE *f = fopen(g_state_path, "w");
     if (!f) return;
 
-    fprintf(f, "{\n  \"master_volume\": %.4f,\n  \"focused_ch\": %d,\n  \"slots\": [\n",
+    /* Save MIDI routes */
+    fprintf(f, "{\n  \"master_volume\": %.4f,\n  \"focused_ch\": %d,\n  \"midi_routes\": [",
             (double)g_rack.master_volume, g_rack.focused_ch);
+    for (int r = 0; r < 16; r++) {
+        fprintf(f, "%s{\"mode\":%d,\"target\":%d}",
+                r ? "," : "", g_midi_routes[r].mode, g_midi_routes[r].target);
+    }
+    fprintf(f, "],\n  \"cc_map\": {");
+    int first_cc = 1;
+    for (int cc = 0; cc < CC_MAP_SIZE; cc++) {
+        if (g_cc_map[cc] >= 0) {
+            fprintf(f, "%s\"%d\":%d", first_cc ? "" : ",", cc, g_cc_map[cc]);
+            first_cc = 0;
+        }
+    }
+    fprintf(f, "},\n  \"slots\": [\n");
 
     for (int i = 0; i < MAX_SLOTS; i++) {
         RackSlot *slot = &g_rack.slots[i];
@@ -764,6 +834,54 @@ static void state_load(void) {
     int fch = 0;
     if (json_get_int(json, "focused_ch", &fch) == 0 && fch >= 0 && fch < MAX_SLOTS)
         g_rack.focused_ch = fch;
+
+    /* Restore MIDI routes */
+    {
+        const char *routes = strstr(json, "\"midi_routes\"");
+        if (routes) {
+            routes = strchr(routes, '[');
+            if (routes) {
+                routes++;
+                for (int r = 0; r < 16; r++) {
+                    const char *obj = strchr(routes, '{');
+                    if (!obj) break;
+                    int mode = 0, target = r;
+                    /* Simple parse: find "mode":N,"target":N */
+                    const char *m = strstr(obj, "\"mode\"");
+                    const char *t = strstr(obj, "\"target\"");
+                    if (m) { m = strchr(m, ':'); if (m) mode = atoi(m + 1); }
+                    if (t) { t = strchr(t, ':'); if (t) target = atoi(t + 1); }
+                    g_midi_routes[r].mode = mode;
+                    g_midi_routes[r].target = target;
+                    routes = strchr(obj, '}');
+                    if (routes) routes++;
+                }
+            }
+        }
+    }
+
+    /* Restore global CC map */
+    {
+        const char *ccm = strstr(json, "\"cc_map\"");
+        if (ccm) {
+            ccm = strchr(ccm, '{');
+            if (ccm) {
+                ccm++;
+                while (*ccm && *ccm != '}') {
+                    while (*ccm == ' ' || *ccm == ',') ccm++;
+                    if (*ccm == '"') {
+                        int from_cc = atoi(ccm + 1);
+                        const char *colon = strchr(ccm, ':');
+                        if (colon && from_cc >= 0 && from_cc < CC_MAP_SIZE) {
+                            g_cc_map[from_cc] = (int8_t)atoi(colon + 1);
+                        }
+                        ccm = colon ? colon + 1 : ccm + 1;
+                        while (*ccm && *ccm != ',' && *ccm != '}') ccm++;
+                    } else break;
+                }
+            }
+        }
+    }
 
     const char *slots_start = strstr(json, "\"slots\"");
     if (!slots_start) { free(json); return; }
@@ -1030,7 +1148,8 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
     uint8_t d1_raw = (len > 1) ? data[1] : 0;
     uint8_t d2_raw = (len > 2) ? data[2] : 0;
     midi_ring_push(status, d1_raw, d2_raw);
-    int ch = status & 0x0F;
+    int midi_ch = status & 0x0F;
+    int ch = midi_route_resolve(midi_ch);
     if (ch < 0 || ch >= MAX_SLOTS) return;
 
     slot_read_begin();
@@ -1158,6 +1277,10 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
         break;
     }
     case 0xB0:
+        /* Global CC remap */
+        if (d1 < CC_MAP_SIZE && g_cc_map[d1] >= 0) {
+            d1 = (uint8_t)g_cc_map[d1];
+        }
         /* CC1 = mod wheel → vibrato LFO depth */
         if (d1 == 1) {
             slot->mod_wheel = (float)d2 / 127.0f;
@@ -1186,6 +1309,43 @@ static inline void midi_dispatch_raw(const uint8_t *data, int len) {
         }
         if (d1 == 81 && d2 == 127) {
             slot_preset_next(slot, itype);
+            state_mark_dirty();
+            sse_mark_dirty();
+            slot_read_end();
+            return;
+        }
+        /* CC83 = mono toggle */
+        if (d1 == 83 && d2 == 127) {
+            slot->mono = !slot->mono;
+            slot->last_note = -1;
+            state_mark_dirty();
+            sse_mark_dirty();
+            slot_read_end();
+            return;
+        }
+        /* CC84 = legato toggle */
+        if (d1 == 84 && d2 == 127) {
+            slot->legato = !slot->legato;
+            state_mark_dirty();
+            sse_mark_dirty();
+            slot_read_end();
+            return;
+        }
+        /* CC85 = instrument prev, CC86 = next */
+        if ((d1 == 85 || d1 == 86) && d2 == 127) {
+            int dir = (d1 == 86) ? 1 : -1;
+            int cur = slot->active ? slot->type_idx : -dir;
+            int next = (cur + dir + g_n_types) % g_n_types;
+            slot_read_end();
+            rack_set_slot(ch, g_type_registry[next]->name);
+            state_mark_dirty();
+            sse_mark_dirty();
+            return;
+        }
+        /* CC87 = focus channel down, CC88 = up */
+        if ((d1 == 87 || d1 == 88) && d2 == 127) {
+            int dir = (d1 == 88) ? 1 : -1;
+            g_rack.focused_ch = (g_rack.focused_ch + dir + MAX_SLOTS) % MAX_SLOTS;
             state_mark_dirty();
             sse_mark_dirty();
             slot_read_end();
@@ -1285,15 +1445,57 @@ static void render_mix(float *mix_buf, float *slot_buf, int frames, int sample_r
         itype->render(st, slot_buf, frames, sample_rate);
 
         float vol = slot->volume;
-        for (int j = 0; j < frames * CHANNELS; j++) {
-            mix_buf[j] += slot_buf[j] * vol;
+        float pk_l = 0, pk_r = 0;
+        for (int j = 0; j < frames; j++) {
+            float l = slot_buf[j*2] * vol;
+            float r = slot_buf[j*2+1] * vol;
+            mix_buf[j*2] += l;
+            mix_buf[j*2+1] += r;
+            float al = fabsf(l), ar = fabsf(r);
+            if (al > pk_l) pk_l = al;
+            if (ar > pk_r) pk_r = ar;
         }
+        /* Peak hold with decay + persistent hold */
+        slot->peak_l = (pk_l > slot->peak_l) ? pk_l : slot->peak_l * 0.95f;
+        slot->peak_r = (pk_r > slot->peak_r) ? pk_r : slot->peak_r * 0.95f;
+        if (pk_l > slot->hold_l) slot->hold_l = pk_l;
+        if (pk_r > slot->hold_r) slot->hold_r = pk_r;
     }
 
     float mv = g_rack.master_volume;
-    for (int j = 0; j < frames * CHANNELS; j++) {
-        mix_buf[j] *= mv;
-        mix_buf[j] = master_limiter(mix_buf[j]);
+    float mpk_l = 0, mpk_r = 0;
+    for (int j = 0; j < frames; j++) {
+        mix_buf[j*2] *= mv;
+        mix_buf[j*2+1] *= mv;
+        mix_buf[j*2] = master_limiter(mix_buf[j*2]);
+        mix_buf[j*2+1] = master_limiter(mix_buf[j*2+1]);
+        float al = fabsf(mix_buf[j*2]), ar = fabsf(mix_buf[j*2+1]);
+        if (al > mpk_l) mpk_l = al;
+        if (ar > mpk_r) mpk_r = ar;
+    }
+    g_rack.master_peak_l = (mpk_l > g_rack.master_peak_l) ? mpk_l : g_rack.master_peak_l * 0.95f;
+    g_rack.master_peak_r = (mpk_r > g_rack.master_peak_r) ? mpk_r : g_rack.master_peak_r * 0.95f;
+    if (mpk_l > g_rack.master_hold_l) g_rack.master_hold_l = mpk_l;
+    if (mpk_r > g_rack.master_hold_r) g_rack.master_hold_r = mpk_r;
+
+    /* Accumulate scope buffer across callbacks until SCOPE_SIZE frames */
+    {
+        int to_copy = frames;
+        int src_off = 0;
+        if (g_rack.scope_pos + to_copy > SCOPE_SIZE) {
+            /* Would overflow — take the tail end that fits */
+            src_off = (g_rack.scope_pos + to_copy - SCOPE_SIZE) * 2;
+            to_copy = SCOPE_SIZE - g_rack.scope_pos;
+        }
+        if (to_copy > 0) {
+            memcpy(g_rack.scope_buf + g_rack.scope_pos * 2,
+                   mix_buf + src_off, (size_t)(to_copy * 2) * sizeof(float));
+            g_rack.scope_pos += to_copy;
+        }
+        if (g_rack.scope_pos >= SCOPE_SIZE) {
+            g_rack.scope_ready = 1;
+            g_rack.scope_pos = 0;
+        }
     }
 }
 

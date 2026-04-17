@@ -346,10 +346,7 @@ static inline void seq_dispatch(snd_seq_event_t *ev) {
             return;
         }
 
-        /* CC24-31 knobs → remap to macro CC14-21 */
-        if (param >= 24 && param <= 31) {
-            ev->data.control.param = param - 10;
-        }
+        /* CC remap now handled per-channel in midi_dispatch_raw */
     }
 
     /* Convert ALSA seq event to raw MIDI bytes and route through

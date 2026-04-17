@@ -86,7 +86,7 @@ typedef struct {
 
     /* State cache — preserves instrument params when cycling types */
     #define SLOT_CACHE_TYPES 8
-    #define SLOT_CACHE_SIZE  4096
+    #define SLOT_CACHE_SIZE  16384
     char             state_cache[SLOT_CACHE_TYPES][SLOT_CACHE_SIZE];
     int              state_cache_valid[SLOT_CACHE_TYPES];
 
@@ -130,6 +130,10 @@ typedef struct {
         int     sent_count;
         int     active;
     } held_notes[MAX_HELD_NOTES];
+
+    /* Metering — updated by render, read by SSE */
+    float            peak_l, peak_r;  /* per-slot peak (decays) */
+    float            hold_l, hold_r;  /* persistent peak hold */
 } RackSlot;
 
 /* The rack */
@@ -138,6 +142,12 @@ typedef struct {
     float            master_volume;
     int              local_mute;    /* 1 = silence ALSA output, only send to bus */
     int              focused_ch;    /* global focused channel — UI follows this */
+    float            master_peak_l, master_peak_r; /* master output peak (decaying) */
+    float            master_hold_l, master_hold_r; /* persistent peak hold (reset manually) */
+    #define SCOPE_SIZE 256
+    float            scope_buf[SCOPE_SIZE * 2];    /* interleaved L/R for FFT/scope */
+    int              scope_pos;                     /* write cursor in frames */
+    int              scope_ready;                   /* 1 = fresh buffer available */
     int              n_types;       /* number of registered instrument types */
     InstrumentType  *types;         /* array of registered types */
 } Rack;

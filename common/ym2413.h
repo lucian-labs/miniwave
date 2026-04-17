@@ -278,7 +278,7 @@ static void ym2413_render(void *state, float *stereo_buf, int frames, int sample
 
     for (int i = 0; i < frames; i++) {
         e_int16 raw = OPLL_calc(s->opll);
-        float sample = (float)raw / 32768.0f * s->volume;
+        float sample = (float)raw / 32768.0f * 15.0f * s->volume;
         stereo_buf[i * 2]     = sample;
         stereo_buf[i * 2 + 1] = sample;
     }
