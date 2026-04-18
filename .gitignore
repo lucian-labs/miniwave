@@ -1,4 +1,5 @@
-miniwave
+/miniwave
+/linux/miniwave
 *.o
 build/
 .DS_Store
