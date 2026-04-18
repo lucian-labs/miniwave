@@ -52,30 +52,43 @@ fun VizScreen(
         fft256(fftRe, fftIm)
 
         val halfN = FFT_SIZE / 2
+        val usable = (halfN * 0.7f).toInt()  // top 30% usually empty at 48kHz
         val bandW = w / NUM_BANDS
 
+        // Bass energy for colour shift
+        var bassSum = 0f
+        for (i in 0 until 16.coerceAtMost(halfN)) {
+            val re = fftRe[i]; val im = fftIm[i]
+            bassSum += sqrt(re * re + im * im)
+        }
+        val bassEnergy = (bassSum / 16f).coerceIn(0f, 1f)
+
         for (band in 0 until NUM_BANDS) {
-            // Log-spaced bin grouping (quadratic → more low-freq resolution)
+            // Log-biased bin mapping: pow(t, 1.6) — musical pitch perception
             val t0 = band.toFloat() / NUM_BANDS
             val t1 = (band + 1).toFloat() / NUM_BANDS
-            val startBin = (t0 * t0 * (halfN - 1)).toInt() + 1
-            val endBin = (t1 * t1 * (halfN - 1)).toInt().coerceAtLeast(startBin + 1)
+            val startBin = (t0.toDouble().pow(1.6) * usable).toInt().coerceAtLeast(1)
+            val endBin = (t1.toDouble().pow(1.6) * usable).toInt().coerceAtLeast(startBin + 1)
 
             var mag = 0f
             val count = (endBin.coerceAtMost(halfN) - startBin).coerceAtLeast(1)
             for (bin in startBin until endBin.coerceAtMost(halfN)) {
-                val re = fftRe[bin]
-                val im = fftIm[bin]
+                val re = fftRe[bin]; val im = fftIm[bin]
                 mag += sqrt(re * re + im * im)
             }
             mag /= count
+
+            // -3dB/oct tilt compensation: 0.5x at bass, 1.9x at treble
+            val tilt = 0.5f + 1.4f * t0
+            mag = (mag * tilt).coerceAtMost(mag) // clamp so heavy bass still maxes
+
             // Peak-hold with decay
             smoothed[band] = maxOf(mag, smoothed[band] * 0.86f)
         }
 
-        // Auto-scale: find current max, ease toward it
+        // Auto-scale: ease toward fitting current peak
         val currentMax = smoothed.max().coerceAtLeast(0.01f)
-        peakScale += (1f / currentMax - peakScale) * 0.08f // ease toward fitting
+        peakScale += (1f / currentMax - peakScale) * 0.08f
 
         for (band in 0 until NUM_BANDS) {
             val barMag = (smoothed[band] * peakScale).coerceIn(0f, 1f)
@@ -84,7 +97,7 @@ fun VizScreen(
             val bw = bandW - 2f
 
             val hue = band.toFloat() / NUM_BANDS
-            val bandColor = hueToColor(hue, color)
+            val bandColor = hueToColor(hue, color, bassEnergy)
 
             // Fill bar — full height
             drawRect(
@@ -174,9 +187,9 @@ private fun fft256(re: FloatArray, im: FloatArray) {
     }
 }
 
-private fun hueToColor(t: Float, base: Color): Color = Color(
-    red = base.red * (1f - t * 0.5f),
+private fun hueToColor(t: Float, base: Color, bass: Float = 0f): Color = Color(
+    red = (base.red * (1f - t * 0.5f) + bass * 0.3f).coerceAtMost(1f),
     green = base.green * 0.3f + t * 0.7f,
-    blue = t * 0.8f + 0.2f,
+    blue = t * 0.8f + 0.2f - bass * 0.15f,
     alpha = 1f
 )
